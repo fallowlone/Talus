@@ -172,3 +172,16 @@ pub fn combo(id_salt: impl egui::AsIdSalt) -> egui::ComboBox {
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, icons::CARET_DOWN, FontId::proportional(12.0), color);
     })
 }
+
+/// A table drawn on a canvas (ER diagram, model): the app's card surface, with the black focus ring
+/// when `ring` (selected, hovered or dragged).
+pub fn table_card(painter: &egui::Painter, rect: egui::Rect, ring: bool) {
+    let p = theme::current(painter.ctx());
+    for shadow in theme::card_shadows(p) {
+        painter.add(shadow.as_shape(rect, 8));
+    }
+    painter.rect_filled(rect, 8.0, p.surface);
+    if ring {
+        painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.5, p.accent), egui::StrokeKind::Inside);
+    }
+}

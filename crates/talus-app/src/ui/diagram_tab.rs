@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use egui::{Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, Vec2, pos2, vec2};
+use egui::{FontId, Pos2, Rect, RichText, Sense, Stroke, Vec2, pos2, vec2};
 use egui_phosphor::regular as icons;
 use talus_core::model::{ObjectRef, TableStructure};
 use uuid::Uuid;
@@ -252,20 +252,9 @@ impl DiagramTab {
             if resp.double_clicked() {
                 out.push(DiagramAction::Nav(Action::OpenData { conn: self.conn, obj: o.clone() }));
             }
-            let stroke = if resp.hovered() || self.dragging.as_deref() == Some(&o.name) {
-                Stroke::new(1.5, p.accent)
-            } else {
-                Stroke::new(1.0, p.border)
-            };
-            painter.rect_filled(r.translate(vec2(2.0, 3.0)), 6.0, Color32::from_black_alpha(60));
-            painter.rect_filled(r, 6.0, p.raised);
+            let active = resp.hovered() || self.dragging.as_deref() == Some(&o.name);
+            super::widgets::table_card(&painter, r, active);
             let header = Rect::from_min_size(r.min, vec2(r.width(), HEADER_H * z));
-            painter.rect_filled(
-                header,
-                egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 },
-                p.accent.gamma_multiply(0.25),
-            );
-            painter.rect_stroke(r, 6.0, stroke, egui::StrokeKind::Inside);
             painter.text(
                 header.left_center() + vec2(8.0 * z, 0.0),
                 egui::Align2::LEFT_CENTER,

@@ -243,11 +243,12 @@ impl DesignTab {
             if ui
                 .add_enabled(
                     can_save,
-                    egui::Button::new(RichText::new(format!("{} Save", icons::FLOPPY_DISK)).color(if can_save {
-                        p.ok
+                    // Pending changes make Save the screen's primary action.
+                    if can_save {
+                        theme::primary_button(p, format!("{} Save", icons::FLOPPY_DISK))
                     } else {
-                        p.text_dim
-                    })),
+                        egui::Button::new(format!("{} Save", icons::FLOPPY_DISK))
+                    },
                 )
                 .on_hover_text("Apply the SQL shown below (⌘S)")
                 .clicked()

@@ -272,6 +272,7 @@ fn table_designer_create_rename_and_drop_field() {
     wait_for(&mut h, "dropped", |_| {
         query_db(&fx, "SELECT count(*) FROM pragma_table_info('gadgets')")[0][0].as_deref() == Some("1")
     });
+    shot(&mut h, "15-table-designer");
 }
 
 #[test]
@@ -349,6 +350,7 @@ fn find_in_database_data_and_structure() {
     h.step();
     click_enabled(&mut h, "\u{e30c} Find");
     wait_for(&mut h, "no structure hits", |h| has_label_containing(h, "No matches."));
+    shot(&mut h, "12-find");
 }
 
 #[test]
@@ -513,6 +515,7 @@ fn er_diagram_lays_out_tables_and_opens_data() {
     wait_for(&mut h, "orders data tab", |h| {
         has_label_containing(h, "Records 0–0") || has_label_containing(h, "No data")
     });
+    shot(&mut h, "10-er-diagram");
 }
 
 fn pick(h: &mut egui_kittest::Harness<'static, talus_app::App>, combo_value: &'static str, option: &'static str) {
@@ -608,6 +611,7 @@ fn structure_sync_creates_missing_tables_on_target() {
     wait_for(&mut h, "applied", |h| has_label_containing(h, "customers: applied +"));
     let source_count = query_db(&fx, "SELECT count(*) FROM customers")[0][0].clone().unwrap();
     assert_eq!(target_count(&fx), source_count);
+    shot(&mut h, "11-structure-sync");
 }
 
 #[test]
@@ -797,6 +801,7 @@ fn query_builder_generates_sql_and_opens_it_in_a_query_tab() {
         "{}",
         editor_text(&h)
     );
+    shot(&mut h, "14-query-builder");
 }
 
 #[test]
@@ -908,6 +913,7 @@ fn redis_key_browser_and_console() {
     button_ending(&h, " Run").click();
     wait_for(&mut h, "reply", |h| has_label_containing(h, "\"hello from redis\""));
     let _ = seed(format!("DEL {key}"));
+    shot(&mut h, "16-redis");
 }
 
 #[test]
@@ -934,6 +940,7 @@ fn mongo_document_browser_edit_and_console() {
     wait_for(&mut h, "documents", |h| has_label_containing(h, "Ann") && has_label_containing(h, "Bob"));
     assert!(has_label_containing(&h, "1–2 of 2"));
     fx.rt.block_on(async { connect_db().await.drop_collection("admin", &coll).await.unwrap() });
+    shot(&mut h, "17-mongo");
 }
 
 #[test]
@@ -1036,6 +1043,7 @@ fn automation_tab_creates_a_job_and_runs_it() {
         .click();
     wait_for(&mut h, "recorded", |h| has_label_containing(h, "finished"));
     assert!(fx.dir.join("support").join("jobs.json").exists());
+    shot(&mut h, "13-automation");
 }
 
 /// First button whose label contains `text`: the navigator row precedes tabs and panels.
@@ -1076,6 +1084,7 @@ fn profile_tab_and_test_data_generation_from_the_table_menu() {
         query_db(&fx, "SELECT count(*) FROM customers WHERE email LIKE '%@example.test'")[0][0],
         query_db(&fx, "SELECT count(email) FROM customers")[0][0]
     );
+    shot(&mut h, "18-profile");
 }
 
 #[test]

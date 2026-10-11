@@ -469,15 +469,7 @@ impl ModelTab {
                 grabbed = Some(i);
             }
             let sel = self.selected == Some(i);
-            // Same surface as the app's cards: white, two-layer shadow, no outline; the selected table
-            // gets the black focus ring.
-            for shadow in theme::card_shadows(p) {
-                painter.add(shadow.as_shape(r, 8));
-            }
-            painter.rect_filled(r, 8.0, p.surface);
-            if sel {
-                painter.rect_stroke(r, 8.0, Stroke::new(1.5, p.accent), egui::StrokeKind::Inside);
-            }
+            super::widgets::table_card(&painter, r, sel);
             let header = Rect::from_min_size(r.min, vec2(r.width(), HEADER_H));
             painter.text(
                 header.left_center() + vec2(8.0, 0.0),

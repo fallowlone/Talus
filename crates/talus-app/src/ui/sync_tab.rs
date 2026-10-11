@@ -246,11 +246,12 @@ impl SyncTab {
             if ui
                 .add_enabled(
                     runnable,
-                    egui::Button::new(RichText::new(format!("{} Execute on Target", icons::PLAY)).color(if runnable {
-                        p.ok
+                    // The screen's primary action once there is something to run.
+                    if runnable {
+                        theme::primary_button(p, format!("{} Execute on Target", icons::PLAY))
                     } else {
-                        p.text_dim
-                    })),
+                        egui::Button::new(format!("{} Execute on Target", icons::PLAY))
+                    },
                 )
                 .clicked()
                 && let Some(Ok(pl)) = &self.plan
@@ -356,11 +357,11 @@ impl SyncTab {
                         }
                         let apply = ui.add_enabled(
                             ready,
-                            egui::Button::new(RichText::new("Sync Data to Target").color(if ready {
-                                p.ok
+                            if ready {
+                                theme::primary_button(p, "Sync Data to Target")
                             } else {
-                                p.text_dim
-                            })),
+                                egui::Button::new("Sync Data to Target")
+                            },
                         );
                         if apply.clicked() {
                             out.push(SyncAction::Data { tables, apply: true });
