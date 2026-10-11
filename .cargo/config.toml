@@ -1,0 +1,4 @@
+[env]
+# The SQL Server driver's futures are large; debug builds of the integration suite need more
+# than the 2 MiB default test-thread stack.
+RUST_MIN_STACK = "67108864"

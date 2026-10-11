@@ -1,0 +1,59 @@
+# Disposable databases for integration tests only. Data lives in tmpfs and disappears
+# with the containers. Credentials are throwaway values for these local containers.
+# Fixed project name: container names and ports do not depend on the checkout directory's name.
+name: talus-test
+services:
+  postgres:
+    # postgres:17 plus the pldebugger extension (PL/pgSQL debugger tests).
+    build: { context: docker, dockerfile: postgres-debugger.Dockerfile }
+    image: talus-test-postgres:17-pldebugger
+    command: ["postgres", "-c", "shared_preload_libraries=plugin_debugger"]
+    environment:
+      POSTGRES_USER: talus
+      POSTGRES_PASSWORD: talus_test_pw
+      POSTGRES_DB: talus_test
+    ports: ["127.0.0.1:55432:5432"]
+    tmpfs: ["/var/lib/postgresql/data"]
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: talus_test_pw
+      MYSQL_DATABASE: talus_test
+      MYSQL_USER: talus
+      MYSQL_PASSWORD: talus_test_pw
+    ports: ["127.0.0.1:53306:3306"]
+    tmpfs: ["/var/lib/mysql"]
+  mssql:
+    # SQL Server has no arm64 image: it runs under x86 emulation (Docker Desktop with Rosetta) and
+    # needs ~1 minute to accept connections. Running it means accepting Microsoft's SQL Server EULA,
+    # so it is opt-in: `MSSQL_ACCEPT_EULA=Y scripts/test-env.sh` (the profile is enabled there).
+    profiles: ["mssql"]
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "${MSSQL_ACCEPT_EULA:-N}"
+      MSSQL_SA_PASSWORD: Talus_Test_pw1
+    ports: ["127.0.0.1:51433:1433"]
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "redis_test_pw"]
+    ports: ["127.0.0.1:56379:6379"]
+  mongo:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: mongo_test_pw
+    ports: ["127.0.0.1:57017:27017"]
+    tmpfs: ["/data/db"]
+  sshd:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM alpine:3.20
+        RUN apk add --no-cache openssh \
+         && ssh-keygen -A \
+         && adduser -D tunnel \
+         && echo 'tunnel:tunnel_test_pw' | chpasswd \
+         && sed -i -e 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        CMD ["/usr/sbin/sshd", "-D", "-e"]
+    ports: ["127.0.0.1:52222:22"]

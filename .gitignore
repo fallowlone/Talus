@@ -1,0 +1,6 @@
+/target
+*.app
+.DS_Store
+
+# Local Claude Code skills / plugins (not part of Talus)
+.claude/
