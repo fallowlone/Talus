@@ -9,7 +9,7 @@
 One window for SQLite, PostgreSQL, MySQL / MariaDB, SQL Server, Oracle, Snowflake, Redis and MongoDB:
 a quiet, monochrome interface, with no trial, no licence keys and no edition gating.
 
-[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-000000)](Cargo.toml)
+[![Version 0.2.1](https://img.shields.io/badge/version-0.2.1-000000)](Cargo.toml)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-000000?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![macOS 12+](https://img.shields.io/badge/macOS-12%2B-000000)](#getting-started)
 [![License: MIT](https://img.shields.io/badge/license-MIT-000000)](LICENSE)
