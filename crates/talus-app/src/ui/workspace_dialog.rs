@@ -350,18 +350,15 @@ impl WorkspaceDialog {
         egui::Grid::new("ws-signin").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
             let l = ui.label("Server");
             ui.add(
-                egui::TextEdit::singleline(&mut self.server)
-                    .hint_text("https://talus.example.com")
-                    .desired_width(300.0),
+                crate::ui::widgets::field(&mut self.server).hint_text("https://talus.example.com").desired_width(300.0),
             )
             .labelled_by(l.id);
             ui.end_row();
             let l = ui.label("User");
-            ui.add(egui::TextEdit::singleline(&mut self.user).desired_width(300.0)).labelled_by(l.id);
+            ui.add(crate::ui::widgets::field(&mut self.user).desired_width(300.0)).labelled_by(l.id);
             ui.end_row();
             let l = ui.label("Password");
-            ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(300.0))
-                .labelled_by(l.id);
+            ui.add(crate::ui::widgets::field(&mut self.password).password(true).desired_width(300.0)).labelled_by(l.id);
             ui.end_row();
         });
         let ready = !self.server.trim().is_empty() && !self.user.trim().is_empty() && !self.password.is_empty();
@@ -421,7 +418,7 @@ impl WorkspaceDialog {
         });
         ui.horizontal(|ui| {
             let l = ui.label("New workspace");
-            ui.add(egui::TextEdit::singleline(&mut self.new_workspace).desired_width(220.0)).labelled_by(l.id);
+            ui.add(crate::ui::widgets::field(&mut self.new_workspace).desired_width(220.0)).labelled_by(l.id);
             if ui
                 .add_enabled(!self.new_workspace.trim().is_empty() && self.busy == 0, egui::Button::new("Create"))
                 .clicked()
@@ -455,7 +452,7 @@ impl WorkspaceDialog {
         if role == Role::Owner {
             ui.horizontal(|ui| {
                 let l = ui.label("Add member");
-                ui.add(egui::TextEdit::singleline(&mut self.member).hint_text("user name").desired_width(160.0))
+                ui.add(crate::ui::widgets::field(&mut self.member).hint_text("user name").desired_width(160.0))
                     .labelled_by(l.id);
                 egui::ComboBox::from_id_salt("ws-member-role").selected_text(self.member_role.label()).show_ui(
                     ui,

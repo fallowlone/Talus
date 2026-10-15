@@ -373,7 +373,7 @@ impl DataTab {
                 if self.loading.is_some() || self.structure.is_loading() {
                     ui.spinner();
                 } else {
-                    ui.label(RichText::new("No data loaded").color(p.text_dim));
+                    crate::ui::widgets::empty_state(ui, egui_phosphor::regular::TABLE, "No data loaded", "");
                 }
             });
             return actions;
@@ -571,7 +571,7 @@ impl DataTab {
             let mut remove = None;
             for (i, f) in self.filters.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut f.enabled, "");
+                    crate::ui::widgets::check(ui, &mut f.enabled, "");
                     super::widgets::combo(("fcol", tab_id, i)).selected_text(&f.column).width(140.0).show_ui(
                         ui,
                         |ui| {
@@ -589,7 +589,7 @@ impl DataTab {
                         },
                     );
                     if f.op.takes_value() {
-                        ui.add(egui::TextEdit::singleline(&mut f.value).desired_width(200.0).hint_text("value"));
+                        ui.add(crate::ui::widgets::field(&mut f.value).desired_width(200.0).hint_text("value"));
                     }
                     if ui.small_button(egui_phosphor::regular::X).on_hover_text("Remove condition").clicked() {
                         remove = Some(i);

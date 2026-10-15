@@ -242,95 +242,102 @@ impl ModelTab {
         let kind = self.model.kind;
         let noun = kind.object_noun();
         // Wraps on narrow windows so no action ends up clipped off the tab.
-        ui.horizontal_wrapped(|ui| {
-            if ui.button(format!("{} New {noun}", icons::PLUS)).clicked() {
-                self.new_table();
-            }
-            ui.menu_button(format!("{} Templates", icons::STACK), |ui| self.templates_menu(ui))
-                .response
-                .on_hover_text("Star schema (fact, dimension) and Data Vault (hub, link, satellite) tables");
-            if ui
-                .add_enabled(self.selected.is_some(), egui::Button::new(format!("{} Delete {noun}", icons::TRASH)))
-                .clicked()
-                && let Some(i) = self.selected.take()
-            {
-                let gone = self.model.tables.remove(i).name;
-                // Relations that pointed at it would dangle.
-                for t in &mut self.model.tables {
-                    t.foreign_keys.retain(|f| !f.ref_table.eq_ignore_ascii_case(&gone));
+        crate::ui::widgets::card(ui, egui::Margin::same(10), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(format!("{} New {noun}", icons::PLUS)).clicked() {
+                    self.new_table();
                 }
-                self.dirty = true;
-            }
-            ui.separator();
-            if ui.button(format!("{} Open…", icons::FOLDER_OPEN)).clicked()
-                && let Some(f) = rfd::FileDialog::new().add_filter("Talus model", &["json", "talus-model"]).pick_file()
-            {
-                self.load(f);
-            }
-            if ui.button(format!("{} Save", icons::FLOPPY_DISK)).clicked() {
-                let target = self.path.clone().or_else(|| {
-                    rfd::FileDialog::new().add_filter("Talus model", &["json"]).set_file_name("model.json").save_file()
-                });
-                if let Some(path) = target {
-                    self.save(path);
-                }
-            }
-            if ui
-                .add_enabled(!self.model.tables.is_empty(), egui::Button::new(format!("{} Print…", icons::PRINTER)))
-                .on_hover_text("Page setup, preview, PDF and printing of the whole model")
-                .clicked()
-            {
-                let scene = crate::print_scene::model_scene(
-                    &self.model,
-                    self.engine,
-                    &crate::print_fonts::PrintFonts::default(),
-                );
-                self.print = Some(super::print_dialog::PrintDialog::new(scene));
-            }
-            ui.separator();
-            // Converting between levels is lossless: the level only decides what is shown and allowed.
-            let l = ui.label("Model type");
-            super::widgets::combo(("model-kind", tab_id))
-                .selected_text(kind.label())
-                .width(110.0)
-                .show_ui(ui, |ui| {
-                    for k in ModelKind::ALL {
-                        if ui.selectable_value(&mut self.model.kind, k, k.label()).changed() {
-                            self.dirty = true;
-                            self.sql = None;
-                            self.error = None;
-                        }
+                ui.menu_button(format!("{} Templates", icons::STACK), |ui| self.templates_menu(ui))
+                    .response
+                    .on_hover_text("Star schema (fact, dimension) and Data Vault (hub, link, satellite) tables");
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new(format!("{} Delete {noun}", icons::TRASH)))
+                    .clicked()
+                    && let Some(i) = self.selected.take()
+                {
+                    let gone = self.model.tables.remove(i).name;
+                    // Relations that pointed at it would dangle.
+                    for t in &mut self.model.tables {
+                        t.foreign_keys.retain(|f| !f.ref_table.eq_ignore_ascii_case(&gone));
                     }
-                })
-                .response
-                .labelled_by(l.id);
-            ui.separator();
-            if ui
-                .add_enabled(
-                    !self.loading,
-                    egui::Button::new(format!("{} Reverse from Selection", icons::ARROW_FAT_LINES_DOWN)),
-                )
-                .on_hover_text("Replace the model with the tables of the schema selected in the navigator")
-                .clicked()
-            {
-                self.loading = true;
-                out.push(ModelAction::Reverse);
-            }
-            if ui
-                .add_enabled(
-                    !self.loading && kind == ModelKind::Physical,
-                    egui::Button::new(format!("{} Compare with Selection", icons::GIT_DIFF)),
-                )
-                .on_hover_text("Statements that make the schema selected in the navigator match the model")
-                .clicked()
-            {
-                self.loading = true;
-                out.push(ModelAction::Compare);
-            }
-            if self.loading {
-                ui.spinner();
-            }
+                    self.dirty = true;
+                }
+                ui.separator();
+                if ui.button(format!("{} Open…", icons::FOLDER_OPEN)).clicked()
+                    && let Some(f) =
+                        rfd::FileDialog::new().add_filter("Talus model", &["json", "talus-model"]).pick_file()
+                {
+                    self.load(f);
+                }
+                if ui.button(format!("{} Save", icons::FLOPPY_DISK)).clicked() {
+                    let target = self.path.clone().or_else(|| {
+                        rfd::FileDialog::new()
+                            .add_filter("Talus model", &["json"])
+                            .set_file_name("model.json")
+                            .save_file()
+                    });
+                    if let Some(path) = target {
+                        self.save(path);
+                    }
+                }
+                if ui
+                    .add_enabled(!self.model.tables.is_empty(), egui::Button::new(format!("{} Print…", icons::PRINTER)))
+                    .on_hover_text("Page setup, preview, PDF and printing of the whole model")
+                    .clicked()
+                {
+                    let scene = crate::print_scene::model_scene(
+                        &self.model,
+                        self.engine,
+                        &crate::print_fonts::PrintFonts::default(),
+                    );
+                    self.print = Some(super::print_dialog::PrintDialog::new(scene));
+                }
+                ui.separator();
+                // Converting between levels is lossless: the level only decides what is shown and allowed.
+                let l = ui.label("Model type");
+                super::widgets::combo(("model-kind", tab_id))
+                    .selected_text(kind.label())
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        for k in ModelKind::ALL {
+                            if ui.selectable_value(&mut self.model.kind, k, k.label()).changed() {
+                                self.dirty = true;
+                                self.sql = None;
+                                self.error = None;
+                            }
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+                ui.separator();
+                if ui
+                    .add_enabled(
+                        !self.loading,
+                        egui::Button::new(format!("{} Reverse from Selection", icons::ARROW_FAT_LINES_DOWN)),
+                    )
+                    .on_hover_text("Replace the model with the tables of the schema selected in the navigator")
+                    .clicked()
+                {
+                    self.loading = true;
+                    out.push(ModelAction::Reverse);
+                }
+                if ui
+                    .add_enabled(
+                        !self.loading && kind == ModelKind::Physical,
+                        egui::Button::new(format!("{} Compare with Selection", icons::GIT_DIFF)),
+                    )
+                    .on_hover_text("Statements that make the schema selected in the navigator match the model")
+                    .clicked()
+                {
+                    self.loading = true;
+                    out.push(ModelAction::Compare);
+                }
+                if self.loading {
+                    ui.spinner();
+                }
+            });
         });
+
         if kind != ModelKind::Physical {
             ui.label(
                 RichText::new(format!(
@@ -356,9 +363,9 @@ impl ModelTab {
                     }
                 },
             );
-            ui.add(egui::TextEdit::singleline(&mut self.database).desired_width(110.0).hint_text("database"));
+            ui.add(crate::ui::widgets::field(&mut self.database).desired_width(110.0).hint_text("database"));
             if self.engine.default_schema().is_some() {
-                ui.add(egui::TextEdit::singleline(&mut self.schema).desired_width(90.0).hint_text("schema"));
+                ui.add(crate::ui::widgets::field(&mut self.schema).desired_width(90.0).hint_text("schema"));
             }
             if ui.button(format!("{} Generate SQL", icons::CODE)).clicked() {
                 let schema =
@@ -584,7 +591,7 @@ impl ModelTab {
             |ui| {
                 ui.horizontal(|ui| {
                     let l = ui.label(kind.object_noun());
-                    ui.add(egui::TextEdit::singleline(&mut t.name).desired_width(240.0)).labelled_by(l.id);
+                    ui.add(crate::ui::widgets::field(&mut t.name).desired_width(240.0)).labelled_by(l.id);
                 });
                 ui.horizontal(|ui| {
                     let l = ui.label("Role");
@@ -614,18 +621,18 @@ impl ModelTab {
                     ui.end_row();
                     for (i, c) in t.columns.iter_mut().enumerate() {
                         // Exact size: a grid cell otherwise keeps last frame's (too narrow) column width.
-                        ui.add_sized([140.0, 22.0], egui::TextEdit::singleline(&mut c.name));
+                        ui.add_sized([140.0, 22.0], crate::ui::widgets::field(&mut c.name));
                         if logical {
                             type_picker(ui, egui::Id::new(("model-type", tab_id, i)), &mut c.ty);
-                            ui.checkbox(&mut c.nullable, "");
+                            crate::ui::widgets::check(ui, &mut c.nullable, "");
                         }
-                        if ui.checkbox(&mut c.primary_key, "").changed() && c.primary_key {
+                        if crate::ui::widgets::check(ui, &mut c.primary_key, "").changed() && c.primary_key {
                             c.nullable = false;
                         }
                         if physical {
-                            ui.checkbox(&mut c.auto_increment, "");
+                            crate::ui::widgets::check(ui, &mut c.auto_increment, "");
                             let mut d = c.default.clone().unwrap_or_default();
-                            if ui.add(egui::TextEdit::singleline(&mut d).desired_width(70.0)).changed() {
+                            if ui.add(crate::ui::widgets::field(&mut d).desired_width(70.0)).changed() {
                                 c.default = Some(d).filter(|d| !d.trim().is_empty());
                             }
                         }
@@ -655,7 +662,7 @@ impl ModelTab {
                 for (i, f) in t.foreign_keys.iter_mut().enumerate() {
                     ui.group(|ui| {
                         ui.horizontal(|ui| {
-                            ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(150.0));
+                            ui.add(crate::ui::widgets::field(&mut f.name).desired_width(150.0));
                             if ui.small_button(icons::TRASH).clicked() {
                                 remove = Some(i);
                             }
@@ -664,7 +671,7 @@ impl ModelTab {
                         let mut rcols = csv(&f.ref_columns);
                         ui.horizontal(|ui| {
                             if ui
-                                .add(egui::TextEdit::singleline(&mut cols).desired_width(110.0).hint_text("columns"))
+                                .add(crate::ui::widgets::field(&mut cols).desired_width(110.0).hint_text("columns"))
                                 .changed()
                             {
                                 f.columns = parse_csv(&cols);
@@ -679,7 +686,7 @@ impl ModelTab {
                                     }
                                 });
                             if ui
-                                .add(egui::TextEdit::singleline(&mut rcols).desired_width(90.0).hint_text("columns"))
+                                .add(crate::ui::widgets::field(&mut rcols).desired_width(90.0).hint_text("columns"))
                                 .changed()
                             {
                                 f.ref_columns = parse_csv(&rcols);
@@ -731,15 +738,15 @@ impl ModelTab {
                 let mut remove = None;
                 for (i, ix) in t.indexes.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut ix.name).desired_width(130.0));
+                        ui.add(crate::ui::widgets::field(&mut ix.name).desired_width(130.0));
                         let mut cols = csv(&ix.columns);
                         if ui
-                            .add(egui::TextEdit::singleline(&mut cols).desired_width(110.0).hint_text("columns"))
+                            .add(crate::ui::widgets::field(&mut cols).desired_width(110.0).hint_text("columns"))
                             .changed()
                         {
                             ix.columns = parse_csv(&cols);
                         }
-                        ui.checkbox(&mut ix.unique, "unique");
+                        crate::ui::widgets::check(ui, &mut ix.unique, "unique");
                         if ui.small_button(icons::TRASH).clicked() {
                             remove = Some(i);
                         }

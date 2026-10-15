@@ -119,7 +119,7 @@ impl ImportDialog {
                 let l = ui.label("File");
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.path).desired_width(380.0).hint_text("/path/to/data.csv"),
+                        crate::ui::widgets::field(&mut self.path).desired_width(380.0).hint_text("/path/to/data.csv"),
                     )
                     .labelled_by(l.id);
                     if ui.button("Browse…").clicked()
@@ -143,8 +143,8 @@ impl ImportDialog {
                 ui.end_row();
                 ui.label("Options");
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.has_header, "First row is a header");
-                    ui.checkbox(&mut self.empty_as_null, "Empty values as NULL");
+                    crate::ui::widgets::check(ui, &mut self.has_header, "First row is a header");
+                    crate::ui::widgets::check(ui, &mut self.empty_as_null, "Empty values as NULL");
                 });
                 ui.end_row();
             });

@@ -83,6 +83,12 @@ fn initial_widths(view: &GridView<'_>, cell: &CellFn<'_>, char_w: f32) -> Vec<f3
         .collect()
 }
 
+/// Hairline along the bottom edge of a header cell.
+fn header_rule(ui: &egui::Ui, color: egui::Color32) {
+    let r = ui.max_rect();
+    ui.painter().hline(r.x_range(), r.bottom(), egui::Stroke::new(1.0, color));
+}
+
 pub fn tsv_escape(s: &str) -> String {
     s.replace(['\t', '\n', '\r'], " ")
 }
@@ -137,13 +143,13 @@ pub fn show(ui: &mut egui::Ui, view: &GridView<'_>, state: &mut GridState, cell:
         }
     }
 
-    // No rules, stripes or tinted header: rows are separated by height, the header by type.
+    // Faint stripes and one hairline under the header; no cell rules. Rows are otherwise separated by height.
     egui::ScrollArea::horizontal().id_salt(view.id.with("h")).auto_shrink([false, false]).show(ui, |ui| {
         // Columns abut (selection fills are continuous); cells pad themselves.
         ui.spacing_mut().item_spacing.x = 0.0;
         let mut tb = TableBuilder::new(ui)
             .id_salt(view.id)
-            .striped(false)
+            .striped(true)
             .resizable(true)
             .auto_shrink([false, false])
             .max_scroll_height(f32::INFINITY)
@@ -158,11 +164,13 @@ pub fn show(ui: &mut egui::Ui, view: &GridView<'_>, state: &mut GridState, cell:
 
         tb.header(row_h + 4.0, |mut h| {
             h.col(|ui| {
+                header_rule(ui, p.border);
                 ui.add_space(CELL_PAD);
                 ui.label(RichText::new("#").color(p.text_faint));
             });
             for &c in view.visible {
                 h.col(|ui| {
+                    header_rule(ui, p.border);
                     ui.add_space(CELL_PAD);
                     let col = &view.columns[c];
                     let arrow = view.sort.iter().find(|(n, _)| *n == col.name).map(|(_, d)| match d {
@@ -185,6 +193,7 @@ pub fn show(ui: &mut egui::Ui, view: &GridView<'_>, state: &mut GridState, cell:
         .body(|body| {
             body.rows(row_h, view.rows, |mut row| {
                 let r = row.index();
+                row.set_selected(state.selected.is_some_and(|(sr, _)| sr == r));
                 let mark = view.row_mark.map_or(RowMark::Normal, |f| f(r));
                 row.col(|ui| {
                     let (txt, color) = match mark {
@@ -224,7 +233,7 @@ pub fn show(ui: &mut egui::Ui, view: &GridView<'_>, state: &mut GridState, cell:
                         if let Some((er, ec, buf)) = state.editing.as_mut().filter(|(er, ec, _)| *er == r && *ec == c) {
                             let (er, ec) = (*er, *ec);
                             let te = ui.add(
-                                egui::TextEdit::singleline(buf)
+                                crate::ui::widgets::field(buf)
                                     .font(mono.clone())
                                     .desired_width(f32::INFINITY)
                                     .frame(egui::Frame::NONE),

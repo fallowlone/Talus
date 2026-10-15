@@ -163,6 +163,20 @@ pub fn engine_icon(engine: Engine) -> &'static str {
     }
 }
 
+/// One-line description shown under the engine name in the connection picker.
+pub fn engine_tagline(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Sqlite => "Local file database",
+        Engine::Postgres => "Advanced open-source SQL",
+        Engine::MySql => "MySQL and MariaDB servers",
+        Engine::SqlServer => "Microsoft SQL Server, Azure SQL",
+        Engine::Oracle => "Oracle Database, PL/SQL",
+        Engine::Snowflake => "Cloud data warehouse",
+        Engine::Redis => "In-memory key-value store",
+        Engine::MongoDb => "Document database",
+    }
+}
+
 const SEMIBOLD: &str = "semibold";
 
 /// Semibold UI font (headings, titles, figures).
@@ -244,16 +258,22 @@ pub fn apply(ctx: &egui::Context, theme: Theme, editor_font: f32) {
         w.bg_stroke = Stroke::NONE;
         w.fg_stroke = Stroke::new(1.0, p.text);
         w.expansion = 0.0;
-        w.corner_radius = 7.into();
+        w.corner_radius = 8.into();
     }
     // (`open.weak_bg_fill` is also the active window's title bar: kept the window colour, no band.)
-    // Controls: inputs are white with an ink-18 % edge, buttons and combos carry a
-    // faint ink fill plus that edge. Edges exist only on controls, never in content.
+    // Controls carry an edge, content does not. Everything is derived from the theme's ink colour
+    // (near-black on light, white on dark) so both themes get the same weight of fill and edge.
+    // Buttons rest as the raised surface with a hairline; inputs are inset into the window
+    // (`p.bg`) with a slightly stronger edge; hover darkens the edge and tints the fill.
+    let base = if dark { 0xff } else { 0x14 };
     v.text_edit_bg_color = Some(p.bg);
-    v.widgets.inactive.weak_bg_fill = ink(0x14, 14);
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, ink(0x14, 46));
-    v.widgets.hovered.weak_bg_fill = ink(0x14, 22);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, ink(0x14, 70));
+    v.widgets.inactive.weak_bg_fill = if dark { ink(base, 10) } else { p.raised };
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, ink(base, if dark { 30 } else { 40 }));
+    v.widgets.hovered.weak_bg_fill = ink(base, if dark { 20 } else { 14 });
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, ink(base, if dark { 70 } else { 90 }));
+    v.widgets.active.bg_stroke = Stroke::new(1.0, ink(base, if dark { 90 } else { 120 }));
+    v.slider_trailing_fill = true;
+    v.handle_shape = egui::style::HandleShape::Circle;
     v.window_corner_radius = 14.into();
     v.menu_corner_radius = 10.into();
     ctx.set_theme(match theme {
@@ -263,8 +283,8 @@ pub fn apply(ctx: &egui::Context, theme: Theme, editor_font: f32) {
     ctx.set_visuals(v);
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        s.spacing.button_padding = egui::vec2(10.0, 5.0);
-        s.spacing.interact_size.y = 26.0;
+        s.spacing.button_padding = egui::vec2(12.0, 5.0);
+        s.spacing.interact_size.y = 28.0;
         s.spacing.menu_margin = egui::Margin::same(6);
         s.spacing.window_margin = egui::Margin::same(16);
         s.text_styles.insert(TextStyle::Body, FontId::proportional(13.5));

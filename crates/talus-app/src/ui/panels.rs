@@ -83,7 +83,7 @@ pub fn objects_view(
         ui.set_width(ui.available_width());
         ui.set_min_height(ui.available_height() - 24.0);
         ui.add(
-            egui::TextEdit::singleline(filter)
+            crate::ui::widgets::field(filter)
                 .hint_text(format!("{} Search objects", icons::MAGNIFYING_GLASS))
                 .desired_width(240.0),
         );
@@ -115,6 +115,7 @@ pub fn objects_view(
                     .resizable(true)
                     .auto_shrink([false, false])
                     .sense(egui::Sense::click())
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .column(Column::initial(340.0).at_least(120.0))
                     .column(Column::remainder())
                     .header(30.0, |mut h| {
@@ -415,9 +416,9 @@ impl HistoryTab {
             if ui.button(format!("{} Refresh", icons::ARROW_CLOCKWISE)).clicked() {
                 action = Some(HistoryAction::Reload);
             }
-            ui.checkbox(&mut self.errors_only, "Errors only");
+            crate::ui::widgets::check(ui, &mut self.errors_only, "Errors only");
             ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
+                crate::ui::widgets::field(&mut self.filter)
                     .hint_text(format!("{} Filter SQL", icons::MAGNIFYING_GLASS))
                     .desired_width(240.0),
             );

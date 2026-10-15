@@ -96,7 +96,7 @@ impl App {
         let open = self.states.values().filter(|s| s.status.is_open()).count();
         card(ui, 220.0, |ui| {
             if self.connections.is_empty() {
-                empty(ui, "No connections yet. Press ⌘N to add one.");
+                widgets::empty_state(ui, icons::PLUGS, "No connections yet", "Press ⌘N to add one.");
                 return;
             }
             for c in self.connections.iter().take(4) {
@@ -179,7 +179,12 @@ impl App {
             self.home_recent.as_ref().map(|(_, r)| r.iter().take(3).cloned().collect()).unwrap_or_default();
         card(ui, 200.0, |ui| {
             if recent.is_empty() {
-                empty(ui, "Queries you run appear here.");
+                widgets::empty_state(
+                    ui,
+                    icons::CLOCK_COUNTER_CLOCKWISE,
+                    "No queries yet",
+                    "Queries you run appear here.",
+                );
                 return;
             }
             for e in recent.iter() {
@@ -236,7 +241,7 @@ impl App {
         ui.add_space(6.0);
         card(ui, 200.0, |ui| {
             if self.jobs.is_empty() {
-                empty(ui, "No scheduled jobs.");
+                widgets::empty_state(ui, icons::CLOCK_COUNTDOWN, "No scheduled jobs", "");
                 return;
             }
             for j in self.jobs.iter().take(3) {
@@ -335,12 +340,6 @@ fn list_row(
         });
     });
     resp
-}
-
-fn empty(ui: &mut Ui, text: &str) {
-    let p = theme::current(ui.ctx());
-    ui.add_space(40.0);
-    ui.vertical_centered(|ui| ui.label(RichText::new(text).color(p.text_faint)));
 }
 
 fn legend(ui: &mut Ui, color: Color32, label: &str) {

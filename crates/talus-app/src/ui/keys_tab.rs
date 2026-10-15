@@ -183,7 +183,7 @@ impl KeysTab {
         }
         ui.horizontal(|ui| {
             let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.pattern).desired_width(220.0).hint_text("pattern, e.g. user:*"),
+                crate::ui::widgets::field(&mut self.pattern).desired_width(220.0).hint_text("pattern, e.g. user:*"),
             );
             let go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (ui.add_enabled(!self.busy, egui::Button::new(format!("{} Scan", icons::MAGNIFYING_GLASS))).clicked()
@@ -238,7 +238,7 @@ impl KeysTab {
             let mut close = false;
             ui.group(|ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut nk.name).desired_width(200.0).hint_text("key name"));
+                    ui.add(crate::ui::widgets::field(&mut nk.name).desired_width(200.0).hint_text("key name"));
                     super::widgets::combo(("nk-type", tab_id)).selected_text(NEW_KEY_TYPES[nk.ty]).width(90.0).show_ui(
                         ui,
                         |ui| {
@@ -254,9 +254,9 @@ impl KeysTab {
                         3 => ("first member", ""),
                         _ => ("member", "score"),
                     };
-                    ui.add(egui::TextEdit::singleline(&mut nk.first_a).desired_width(150.0).hint_text(la));
+                    ui.add(crate::ui::widgets::field(&mut nk.first_a).desired_width(150.0).hint_text(la));
                     if !lb.is_empty() {
-                        ui.add(egui::TextEdit::singleline(&mut nk.first_b).desired_width(100.0).hint_text(lb));
+                        ui.add(crate::ui::widgets::field(&mut nk.first_b).desired_width(100.0).hint_text(lb));
                     }
                     let score = nk.first_b.trim().parse::<f64>().ok();
                     let ready = !nk.name.is_empty() && (nk.ty != 4 || score.is_some());
@@ -309,7 +309,12 @@ impl KeysTab {
         });
 
         let Some(key) = self.selected.clone() else {
-            ui.label(RichText::new("Select a key.").color(p.text_dim));
+            crate::ui::widgets::empty_state(
+                ui,
+                egui_phosphor::regular::KEY,
+                "Select a key",
+                "Pick a key on the left to view or edit its value.",
+            );
             return cmds;
         };
         let info = self.keys.iter().find(|k| k.key == key).cloned();
@@ -322,7 +327,7 @@ impl KeysTab {
         ui.horizontal(|ui| {
             match self.rename.as_mut() {
                 Some(name) => {
-                    ui.add(egui::TextEdit::singleline(name).desired_width(180.0));
+                    ui.add(crate::ui::widgets::field(name).desired_width(180.0));
                     if ui.button("Rename").clicked() && !name.is_empty() && *name != key {
                         cmds.push(NoSqlCmd::run(
                             NoSqlOp::RedisRename { key: key.clone(), new_key: name.clone() },
@@ -343,7 +348,7 @@ impl KeysTab {
             ui.separator();
             match self.ttl_edit.as_mut() {
                 Some(t) => {
-                    ui.add(egui::TextEdit::singleline(t).desired_width(80.0).hint_text("seconds"));
+                    ui.add(crate::ui::widgets::field(t).desired_width(80.0).hint_text("seconds"));
                     let secs = t.trim().parse::<u64>().ok();
                     if ui.add_enabled(secs.is_some(), egui::Button::new("Set TTL")).clicked() {
                         cmds.push(NoSqlCmd::run(NoSqlOp::RedisSetTtl { key: key.clone(), seconds: secs }, "mutate"));
@@ -434,7 +439,7 @@ impl KeysTab {
                             ui.label(RichText::new(f).monospace());
                             if let Some(edit) = self.row_edits.get_mut(i) {
                                 ui.add(
-                                    egui::TextEdit::singleline(edit)
+                                    crate::ui::widgets::field(edit)
                                         .desired_width(280.0)
                                         .font(egui::TextStyle::Monospace),
                                 );
@@ -465,8 +470,8 @@ impl KeysTab {
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.add_a).desired_width(140.0).hint_text("field"));
-                        ui.add(egui::TextEdit::singleline(&mut self.add_b).desired_width(200.0).hint_text("value"));
+                        ui.add(crate::ui::widgets::field(&mut self.add_a).desired_width(140.0).hint_text("field"));
+                        ui.add(crate::ui::widgets::field(&mut self.add_b).desired_width(200.0).hint_text("value"));
                         if ui
                             .add_enabled(!self.add_a.is_empty(), egui::Button::new(format!("{} Add", icons::PLUS)))
                             .clicked()
@@ -492,7 +497,7 @@ impl KeysTab {
                             ui.label(RichText::new(i.to_string()).color(p.text_dim));
                             if let Some(edit) = self.row_edits.get_mut(i) {
                                 ui.add(
-                                    egui::TextEdit::singleline(edit)
+                                    crate::ui::widgets::field(edit)
                                         .desired_width(320.0)
                                         .font(egui::TextStyle::Monospace),
                                 );
@@ -524,7 +529,7 @@ impl KeysTab {
                     });
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.add_a)
+                            crate::ui::widgets::field(&mut self.add_a)
                                 .desired_width(260.0)
                                 .hint_text("new element (appended)"),
                         );
@@ -557,9 +562,7 @@ impl KeysTab {
                         });
                     }
                     ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.add_a).desired_width(260.0).hint_text("new member"),
-                        );
+                        ui.add(crate::ui::widgets::field(&mut self.add_a).desired_width(260.0).hint_text("new member"));
                         if ui
                             .add_enabled(!self.add_a.is_empty(), egui::Button::new(format!("{} Add", icons::PLUS)))
                             .clicked()
@@ -591,8 +594,8 @@ impl KeysTab {
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.add_a).desired_width(160.0).hint_text("member"));
-                        ui.add(egui::TextEdit::singleline(&mut self.add_b).desired_width(80.0).hint_text("score"));
+                        ui.add(crate::ui::widgets::field(&mut self.add_a).desired_width(160.0).hint_text("member"));
+                        ui.add(crate::ui::widgets::field(&mut self.add_b).desired_width(80.0).hint_text("score"));
                         let score = self.add_b.trim().parse::<f64>().ok();
                         if ui
                             .add_enabled(

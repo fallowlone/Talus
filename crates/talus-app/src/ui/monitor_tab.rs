@@ -73,7 +73,11 @@ impl MonitorTab {
             {
                 out.push(MonitorAction::Refresh);
             }
-            ui.checkbox(&mut self.auto_refresh, format!("Auto-refresh every {}s", AUTO_REFRESH.as_secs()));
+            crate::ui::widgets::check(
+                ui,
+                &mut self.auto_refresh,
+                format!("Auto-refresh every {}s", AUTO_REFRESH.as_secs()),
+            );
             ui.separator();
             let sel = self.selected_id();
             if ui

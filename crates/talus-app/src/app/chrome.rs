@@ -223,7 +223,7 @@ impl App {
             );
             let r = child.put(
                 edit_rect,
-                egui::TextEdit::singleline(&mut self.nav_filter)
+                crate::ui::widgets::field(&mut self.nav_filter)
                     .id(id)
                     .frame(egui::Frame::NONE)
                     .hint_text(RichText::new("Search for anything…").color(p.text_faint))
@@ -268,34 +268,53 @@ impl App {
                 for (i, t) in self.tabs.iter().enumerate() {
                     let selected = i == self.active;
                     let closable = !matches!(t.kind, TabKind::Objects);
-                    // Active tab: black semibold title; others dim. No chip, no underline.
-                    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let title = format!("{}  {}", t.icon(), t.title());
-                        let text = if selected {
-                            RichText::new(title).font(theme::semibold(13.5)).color(p.text)
-                        } else {
-                            RichText::new(title).color(p.text_dim)
-                        };
-                        let r = ui.add(egui::Button::new(text).frame_when_inactive(false));
-                        if r.clicked() {
-                            activate = Some(i);
+                    // Active tab: black semibold title; others dim. The hover chip is painted by hand over a
+                    // fixed-size rect: a framed `Button` changes its padding on hover and made tabs jump.
+                    let title = format!("{}  {}", t.icon(), t.title());
+                    let font = if selected { theme::semibold(13.5) } else { egui::FontId::proportional(13.5) };
+                    let color = if selected { p.text } else { p.text_dim };
+                    let galley = ui.painter().layout_no_wrap(title.clone(), font, color);
+                    let close_w = if closable { 20.0 } else { 0.0 };
+                    let size = vec2(galley.size().x + 20.0 + close_w, 26.0);
+                    let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+                    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &title));
+                    let hovered = r.hovered();
+                    if hovered {
+                        ui.painter().rect_filled(rect, 7.0, p.hover);
+                    }
+                    ui.painter().galley(
+                        egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0),
+                        galley,
+                        color,
+                    );
+                    if r.clicked() {
+                        activate = Some(i);
+                    }
+                    if r.middle_clicked() && closable {
+                        close = Some(t.id);
+                    }
+                    if closable {
+                        let cr = egui::Rect::from_center_size(
+                            egui::pos2(rect.right() - 14.0, rect.center().y),
+                            vec2(18.0, 18.0),
+                        );
+                        let cresp = ui.interact(cr, r.id.with("close"), Sense::click());
+                        cresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close tab"));
+                        if cresp.hovered() {
+                            ui.painter().rect_filled(cr, 5.0, p.selected);
                         }
-                        if r.middle_clicked() && closable {
+                        let icon_color = if cresp.hovered() || hovered || selected { p.text_dim } else { p.text_faint };
+                        ui.painter().text(
+                            cr.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icons::X,
+                            egui::FontId::proportional(11.0),
+                            icon_color,
+                        );
+                        if cresp.on_hover_text("Close (⌘W)").clicked() {
                             close = Some(t.id);
                         }
-                        if closable
-                            && ui
-                                .add(
-                                    egui::Button::new(RichText::new(icons::X).size(11.0).color(p.text_faint))
-                                        .frame(false),
-                                )
-                                .on_hover_text("Close (⌘W)")
-                                .clicked()
-                        {
-                            close = Some(t.id);
-                        }
-                    });
+                    }
                 }
                 if let Some(i) = activate {
                     self.active = i;

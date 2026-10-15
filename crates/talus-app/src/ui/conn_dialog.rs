@@ -147,7 +147,7 @@ impl ConnDialog {
 
     fn ssh_ui(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("SSH Tunnel").id_salt("conn-ssh").default_open(self.use_ssh).show(ui, |ui| {
-            if ui.checkbox(&mut self.use_ssh, "Use SSH tunnel").changed() && self.use_ssh {
+            if crate::ui::widgets::check(ui, &mut self.use_ssh, "Use SSH tunnel").changed() && self.use_ssh {
                 self.use_http = false;
                 self.use_php = false;
             }
@@ -156,22 +156,22 @@ impl ConnDialog {
                     ui,
                     |ui| {
                         let l = ui.label("SSH Host");
-                        ui.add(egui::TextEdit::singleline(&mut self.ssh.host).desired_width(300.0)).labelled_by(l.id);
+                        ui.add(crate::ui::widgets::field(&mut self.ssh.host).desired_width(300.0)).labelled_by(l.id);
                         ui.end_row();
                         let l = ui.label("SSH Port");
-                        ui.add(egui::TextEdit::singleline(&mut self.ssh_port_text).desired_width(80.0))
+                        ui.add(crate::ui::widgets::field(&mut self.ssh_port_text).desired_width(80.0))
                             .labelled_by(l.id);
                         ui.end_row();
                         let l = ui.label("SSH User Name");
-                        ui.add(egui::TextEdit::singleline(&mut self.ssh.user).desired_width(300.0)).labelled_by(l.id);
+                        ui.add(crate::ui::widgets::field(&mut self.ssh.user).desired_width(300.0)).labelled_by(l.id);
                         ui.end_row();
                         ui.label("Authentication");
                         ui.horizontal(|ui| {
                             let is_pw = matches!(self.ssh.auth, SshAuth::Password);
-                            if ui.radio(is_pw, "Password").clicked() {
+                            if crate::ui::widgets::radio(ui, is_pw, "Password").clicked() {
                                 self.ssh.auth = SshAuth::Password;
                             }
-                            if ui.radio(!is_pw, "Private key").clicked() && is_pw {
+                            if crate::ui::widgets::radio(ui, !is_pw, "Private key").clicked() && is_pw {
                                 self.ssh.auth = SshAuth::PrivateKey { path: String::new() };
                             }
                         });
@@ -180,9 +180,7 @@ impl ConnDialog {
                             let l = ui.label("Private Key File");
                             ui.horizontal(|ui| {
                                 ui.add(
-                                    egui::TextEdit::singleline(path)
-                                        .desired_width(220.0)
-                                        .hint_text("~/.ssh/id_ed25519"),
+                                    crate::ui::widgets::field(path).desired_width(220.0).hint_text("~/.ssh/id_ed25519"),
                                 )
                                 .labelled_by(l.id);
                                 if ui.button("Browse…").clicked()
@@ -198,14 +196,19 @@ impl ConnDialog {
                         let l = ui.label(label);
                         ui.horizontal(|ui| {
                             ui.add(
-                                egui::TextEdit::singleline(&mut self.tunnel_secret).password(true).desired_width(200.0),
+                                crate::ui::widgets::field(&mut self.tunnel_secret).password(true).desired_width(200.0),
                             )
                             .labelled_by(l.id);
-                            ui.checkbox(&mut self.ssh.save_secret, "Save in Keychain");
+                            crate::ui::widgets::check(ui, &mut self.ssh.save_secret, "Save in Keychain");
                         });
                         ui.end_row();
                         ui.label("");
-                        ui.checkbox(&mut self.ssh.trust_new_host_key, "Trust host key on first connect").on_hover_text(
+                        crate::ui::widgets::check(
+                            ui,
+                            &mut self.ssh.trust_new_host_key,
+                            "Trust host key on first connect",
+                        )
+                        .on_hover_text(
                             "Unknown host keys are rejected unless this is checked; changed keys are always rejected.",
                         );
                         ui.end_row();
@@ -219,7 +222,7 @@ impl ConnDialog {
     /// HTTP tunnel: the connection goes through an HTTP proxy's `CONNECT` (corporate proxies, Squid, …).
     fn http_ui(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("HTTP Tunnel").id_salt("conn-http").default_open(self.use_http).show(ui, |ui| {
-            if ui.checkbox(&mut self.use_http, "Use HTTP tunnel").changed() && self.use_http {
+            if crate::ui::widgets::check(ui, &mut self.use_http, "Use HTTP tunnel").changed() && self.use_http {
                 self.use_ssh = false;
                 self.use_php = false;
             }
@@ -228,15 +231,15 @@ impl ConnDialog {
                     ui,
                     |ui| {
                         let l = ui.label("Proxy Host");
-                        ui.add(egui::TextEdit::singleline(&mut self.http.host).desired_width(300.0)).labelled_by(l.id);
+                        ui.add(crate::ui::widgets::field(&mut self.http.host).desired_width(300.0)).labelled_by(l.id);
                         ui.end_row();
                         let l = ui.label("Proxy Port");
-                        ui.add(egui::TextEdit::singleline(&mut self.http_port_text).desired_width(80.0))
+                        ui.add(crate::ui::widgets::field(&mut self.http_port_text).desired_width(80.0))
                             .labelled_by(l.id);
                         ui.end_row();
                         let l = ui.label("Proxy User Name");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.http.user)
+                            crate::ui::widgets::field(&mut self.http.user)
                                 .hint_text("empty: no authentication")
                                 .desired_width(300.0),
                         )
@@ -245,10 +248,10 @@ impl ConnDialog {
                         let l = ui.label("Proxy Password");
                         ui.horizontal(|ui| {
                             ui.add(
-                                egui::TextEdit::singleline(&mut self.tunnel_secret).password(true).desired_width(200.0),
+                                crate::ui::widgets::field(&mut self.tunnel_secret).password(true).desired_width(200.0),
                             )
                             .labelled_by(l.id);
-                            ui.checkbox(&mut self.http.save_secret, "Save in Keychain");
+                            crate::ui::widgets::check(ui, &mut self.http.save_secret, "Save in Keychain");
                         });
                         ui.end_row();
                     },
@@ -261,7 +264,7 @@ impl ConnDialog {
     /// PHP tunnel: a script on a web host that can reach the database (shared hosting, no SSH).
     fn php_ui(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("PHP Tunnel").id_salt("conn-php").default_open(self.use_php).show(ui, |ui| {
-            if ui.checkbox(&mut self.use_php, "Use PHP tunnel script").changed() && self.use_php {
+            if crate::ui::widgets::check(ui, &mut self.use_php, "Use PHP tunnel script").changed() && self.use_php {
                 self.use_ssh = false;
                 self.use_http = false;
             }
@@ -271,7 +274,7 @@ impl ConnDialog {
                     |ui| {
                         let l = ui.label("Script Address");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.php.url)
+                            crate::ui::widgets::field(&mut self.php.url)
                                 .hint_text("https://example.com/talus-tunnel.php")
                                 .desired_width(300.0),
                         )
@@ -280,10 +283,10 @@ impl ConnDialog {
                         let l = ui.label("Tunnel Key");
                         ui.horizontal(|ui| {
                             ui.add(
-                                egui::TextEdit::singleline(&mut self.tunnel_secret).password(true).desired_width(200.0),
+                                crate::ui::widgets::field(&mut self.tunnel_secret).password(true).desired_width(200.0),
                             )
                             .labelled_by(l.id);
-                            ui.checkbox(&mut self.php.save_secret, "Save in Keychain");
+                            crate::ui::widgets::check(ui, &mut self.php.save_secret, "Save in Keychain");
                         });
                         ui.end_row();
                     },
@@ -334,20 +337,30 @@ impl ConnDialog {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(RichText::new("Connection type").color(p.text_dim));
-                ui.horizontal_wrapped(|ui| {
-                    for e in Engine::ALL {
-                        let selected = self.cfg.engine == e;
-                        let text = RichText::new(format!("{}  {}", theme::engine_icon(e), e.label()))
-                            .color(if selected { p.accent } else { p.text_dim });
-                        let r = ui.add_enabled(
-                            self.is_new || selected,
-                            egui::Button::selectable(selected, text).min_size(egui::vec2(132.0, 34.0)),
-                        );
-                        if r.clicked() {
-                            self.set_engine(e);
+                // Fixed two-column grid: a wrapping layout inside an auto-sized window has no stable width.
+                const CARD_W: f32 = 250.0;
+                for pair in Engine::ALL.chunks(2) {
+                    ui.horizontal(|ui| {
+                        for &e in pair {
+                            let selected = self.cfg.engine == e;
+                            let r = ui
+                                .add_enabled_ui(self.is_new || selected, |ui| {
+                                    super::widgets::option_card(
+                                        ui,
+                                        CARD_W,
+                                        theme::engine_icon(e),
+                                        e.label(),
+                                        theme::engine_tagline(e),
+                                        selected,
+                                    )
+                                })
+                                .inner;
+                            if r.clicked() {
+                                self.set_engine(e);
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 if self.is_new {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Cloud preset").color(p.text_dim));
@@ -369,7 +382,7 @@ impl ConnDialog {
                 egui::Grid::new("conn-form").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(ui, |ui| {
                     let l = ui.label("Connection Name");
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.cfg.name)
+                        crate::ui::widgets::field(&mut self.cfg.name)
                             .hint_text("e.g. Production analytics")
                             .desired_width(300.0),
                     )
@@ -382,17 +395,17 @@ impl ConnDialog {
                             if snowflake { "e.g. xy12345.eu-west-1" } else { self.preset.map_or("localhost", |p| {
                                 p.host_hint
                             }) };
-                        ui.add(egui::TextEdit::singleline(&mut self.cfg.host).hint_text(hint).desired_width(300.0))
+                        ui.add(crate::ui::widgets::field(&mut self.cfg.host).hint_text(hint).desired_width(300.0))
                             .labelled_by(l.id);
                         ui.end_row();
                         if !snowflake {
                             let l = ui.label("Port");
-                            ui.add(egui::TextEdit::singleline(&mut self.port_text).desired_width(80.0))
+                            ui.add(crate::ui::widgets::field(&mut self.port_text).desired_width(80.0))
                                 .labelled_by(l.id);
                             ui.end_row();
                         }
                         let l = ui.label("User Name");
-                        ui.add(egui::TextEdit::singleline(&mut self.cfg.user).desired_width(300.0)).labelled_by(l.id);
+                        ui.add(crate::ui::widgets::field(&mut self.cfg.user).desired_width(300.0)).labelled_by(l.id);
                         ui.end_row();
                         if snowflake {
                             let key_file = match &self.cfg.snowflake_config().auth {
@@ -406,9 +419,9 @@ impl ConnDialog {
                             };
                             ui.label("Authentication");
                             ui.horizontal(|ui| {
-                                ui.radio_value(&mut method, 0, "Password");
-                                ui.radio_value(&mut method, 1, "Key pair");
-                                ui.radio_value(&mut method, 2, "OAuth token");
+                                crate::ui::widgets::radio_value(ui, &mut method, 0, "Password");
+                                crate::ui::widgets::radio_value(ui, &mut method, 1, "Key pair");
+                                crate::ui::widgets::radio_value(ui, &mut method, 2, "OAuth token");
                             });
                             ui.end_row();
                             self.cfg.snowflake.get_or_insert_default().auth = match method {
@@ -424,7 +437,7 @@ impl ConnDialog {
                                 &mut self.cfg.snowflake.get_or_insert_default().auth
                             {
                                 ui.add(
-                                    egui::TextEdit::singleline(key_file)
+                                    crate::ui::widgets::field(key_file)
                                         .hint_text("/path/to/rsa_key.p8 (unencrypted PEM)")
                                         .desired_width(300.0),
                                 )
@@ -439,10 +452,10 @@ impl ConnDialog {
                             });
                             ui.horizontal(|ui| {
                                 ui.add(
-                                    egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0),
+                                    crate::ui::widgets::field(&mut self.password).password(true).desired_width(200.0),
                                 )
                                 .labelled_by(l.id);
-                                ui.checkbox(&mut self.cfg.save_password, "Save in Keychain");
+                                crate::ui::widgets::check(ui, &mut self.cfg.save_password, "Save in Keychain");
                             });
                             ui.end_row();
                         }
@@ -458,7 +471,7 @@ impl ConnDialog {
                             Engine::Snowflake => "e.g. ANALYTICS",
                             e => e.default_database().unwrap_or("(none)"),
                         };
-                        ui.add(egui::TextEdit::singleline(&mut self.cfg.database).hint_text(hint).desired_width(300.0))
+                        ui.add(crate::ui::widgets::field(&mut self.cfg.database).hint_text(hint).desired_width(300.0))
                             .labelled_by(l.id);
                         ui.end_row();
                         if snowflake {
@@ -476,7 +489,7 @@ impl ConnDialog {
                                     "Schema" => &mut self.cfg.snowflake.get_or_insert_default().schema,
                                     _ => &mut self.cfg.snowflake.get_or_insert_default().endpoint,
                                 };
-                                ui.add(egui::TextEdit::singleline(field).hint_text(hint).desired_width(300.0))
+                                ui.add(crate::ui::widgets::field(field).hint_text(hint).desired_width(300.0))
                                     .labelled_by(l.id);
                                 ui.end_row();
                             }
@@ -489,7 +502,7 @@ impl ConnDialog {
                             ui.label("SSL");
                             ui.horizontal(|ui| {
                                 for m in SslMode::ALL {
-                                    ui.radio_value(&mut self.cfg.ssl_mode, m, m.label());
+                                    crate::ui::widgets::radio_value(ui, &mut self.cfg.ssl_mode, m, m.label());
                                 }
                             });
                             ui.end_row();
@@ -497,7 +510,7 @@ impl ConnDialog {
                                 // `prefer` cannot be negotiated on Oracle's listener: only require / verify-full use TCPS.
                                 let l = ui.label("Wallet Directory");
                                 ui.add(
-                                    egui::TextEdit::singleline(&mut self.cfg.ssl_ca_file)
+                                    crate::ui::widgets::field(&mut self.cfg.ssl_ca_file)
                                         .hint_text("folder with ewallet.pem (empty = system roots); TCPS needs require / verify-full")
                                         .desired_width(300.0),
                                 )
@@ -506,7 +519,7 @@ impl ConnDialog {
                             } else if self.cfg.ssl_mode == SslMode::VerifyFull {
                                 let l = ui.label("CA Certificate");
                                 ui.add(
-                                    egui::TextEdit::singleline(&mut self.cfg.ssl_ca_file)
+                                    crate::ui::widgets::field(&mut self.cfg.ssl_ca_file)
                                         .hint_text("PEM file (empty = system roots)")
                                         .desired_width(300.0),
                                 )
@@ -518,7 +531,7 @@ impl ConnDialog {
                         let l = ui.label("Database File");
                         ui.horizontal(|ui| {
                             ui.add(
-                                egui::TextEdit::singleline(&mut self.cfg.database)
+                                crate::ui::widgets::field(&mut self.cfg.database)
                                     .hint_text("/path/to/database.sqlite")
                                     .desired_width(250.0),
                             )
@@ -547,23 +560,23 @@ impl ConnDialog {
                         });
                         ui.end_row();
                         ui.label("Encryption");
-                        ui.checkbox(&mut self.cfg.encrypted, "Encrypted file (SQLCipher)");
+                        crate::ui::widgets::check(ui, &mut self.cfg.encrypted, "Encrypted file (SQLCipher)");
                         ui.end_row();
                         if self.cfg.encrypted {
                             let l = ui.label("Password");
                             ui.horizontal(|ui| {
                                 ui.add(
-                                    egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0),
+                                    crate::ui::widgets::field(&mut self.password).password(true).desired_width(200.0),
                                 )
                                 .labelled_by(l.id);
-                                ui.checkbox(&mut self.cfg.save_password, "Save in Keychain");
+                                crate::ui::widgets::check(ui, &mut self.cfg.save_password, "Save in Keychain");
                             });
                             ui.end_row();
                         }
                     }
                     let l = ui.label("Group");
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.group_text)
+                        crate::ui::widgets::field(&mut self.group_text)
                             .hint_text("optional folder in the navigator")
                             .desired_width(300.0),
                     )

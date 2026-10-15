@@ -50,9 +50,14 @@ pub fn harness(fx: &Fixture) -> Harness<'static, App> {
     let paths = AppPaths::at(fx.dir.join("support")).unwrap();
     let handle = fx.rt.handle().clone();
     // Small step so two clicks one frame apart fall inside egui's double-click window.
-    Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(0.01).build_eframe(move |cc| {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(0.01).build_eframe(move |cc| {
         App::new(&cc.egui_ctx, AppEnv { paths, secrets: Arc::new(MemoryStore::default()), rt: handle })
-    })
+    });
+    // Visual review aid: `TALUS_SHOT_THEME=dark` renders every test in the dark theme.
+    if std::env::var("TALUS_SHOT_THEME").as_deref() == Ok("dark") {
+        h.state_mut().settings.theme = talus_core::store::config::Theme::Dark;
+    }
+    h
 }
 
 /// Steps frames until `cond` holds (async work completes on the runtime threads).

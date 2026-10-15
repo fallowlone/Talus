@@ -2151,7 +2151,7 @@ impl App {
             let (conn, mut go, mut open) = (*conn, false, true);
             egui::Window::new("New Database").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
                 let l = ui.label("Database Name");
-                let r = ui.add(egui::TextEdit::singleline(name).desired_width(260.0)).labelled_by(l.id);
+                let r = ui.add(crate::ui::widgets::field(name).desired_width(260.0)).labelled_by(l.id);
                 go = (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                     || ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Create")).clicked();
             });
@@ -2824,7 +2824,7 @@ impl App {
             );
             ui.horizontal(|ui| {
                 let l = ui.label("Rows");
-                ui.add(egui::TextEdit::singleline(&mut d.rows).desired_width(100.0)).labelled_by(l.id);
+                ui.add(crate::ui::widgets::field(&mut d.rows).desired_width(100.0)).labelled_by(l.id);
             });
             let n = d.rows.trim().parse::<usize>().ok().filter(|n| (1..=talus_core::datagen::MAX_ROWS).contains(n));
             ui.horizontal(|ui| {

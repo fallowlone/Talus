@@ -318,8 +318,8 @@ impl PrintDialog {
             ui.end_row();
             ui.label("Orientation");
             ui.horizontal(|ui| {
-                ui.radio_value(&mut self.setup.landscape, false, "Portrait");
-                ui.radio_value(&mut self.setup.landscape, true, "Landscape");
+                crate::ui::widgets::radio_value(ui, &mut self.setup.landscape, false, "Portrait");
+                crate::ui::widgets::radio_value(ui, &mut self.setup.landscape, true, "Landscape");
             });
             ui.end_row();
             let l = ui.label("Margins (mm)");
@@ -352,10 +352,10 @@ impl PrintDialog {
             }
         }
         ui.add_space(4.0);
-        ui.checkbox(&mut self.setup.keep_whole, "Keep tables whole when splitting")
+        crate::ui::widgets::check(ui, &mut self.setup.keep_whole, "Keep tables whole when splitting")
             .on_hover_text("Moves the cut between sheets into the gaps between tables where there is room");
-        ui.checkbox(&mut self.setup.header, "Title at the top of each sheet");
-        ui.checkbox(&mut self.setup.footer, "Page numbers and date at the bottom");
+        crate::ui::widgets::check(ui, &mut self.setup.header, "Title at the top of each sheet");
+        crate::ui::widgets::check(ui, &mut self.setup.footer, "Page numbers and date at the bottom");
         if before != (self.setup, self.fit, self.pages_across, self.pages_down, self.percent) {
             self.relayout();
         }

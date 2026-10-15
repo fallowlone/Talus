@@ -358,7 +358,7 @@ impl BuilderTab {
                         for c in &model[*ti].1.columns {
                             let pick = SlotCol { slot, column: c.name.clone() };
                             let mut on = self.columns.contains(&pick);
-                            if ui.checkbox(&mut on, &c.name).changed() {
+                            if crate::ui::widgets::check(ui, &mut on, &c.name).changed() {
                                 if on {
                                     self.columns.push(pick);
                                 } else {
@@ -385,7 +385,7 @@ impl BuilderTab {
                     );
                     if c.op.needs_value() {
                         let hint = if c.op == Op::In { "a, b, c" } else { "value" };
-                        ui.add(egui::TextEdit::singleline(&mut c.value).desired_width(180.0).hint_text(hint));
+                        ui.add(crate::ui::widgets::field(&mut c.value).desired_width(180.0).hint_text(hint));
                     }
                     if ui.button(icons::TRASH).clicked() {
                         remove_cond = Some(i);
@@ -433,8 +433,8 @@ impl BuilderTab {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let l = ui.label("Limit");
-                ui.add(egui::TextEdit::singleline(&mut self.limit).desired_width(80.0)).labelled_by(l.id);
-                ui.checkbox(&mut self.distinct, "DISTINCT");
+                ui.add(crate::ui::widgets::field(&mut self.limit).desired_width(80.0)).labelled_by(l.id);
+                crate::ui::widgets::check(ui, &mut self.distinct, "DISTINCT");
             });
         });
         out

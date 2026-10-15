@@ -302,7 +302,7 @@ impl SqlTab {
             let conn_name = self
                 .conn
                 .and_then(|c| ctx.connections.iter().find(|x| x.id == c))
-                .map_or("— choose connection —".to_string(), |c| c.name.clone());
+                .map_or("Choose connection".to_string(), |c| c.name.clone());
             let before = (self.conn, self.database.clone());
             super::widgets::combo(("conn", tab_id)).selected_text(conn_name).width(170.0).show_ui(ui, |ui| {
                 for c in ctx.connections {
@@ -381,7 +381,7 @@ impl SqlTab {
             {
                 actions.push(SqlAction::Stop);
             }
-            ui.checkbox(&mut self.continue_on_error, "Continue on error");
+            crate::ui::widgets::check(ui, &mut self.continue_on_error, "Continue on error");
             ui.separator();
             let idle = self.conn.is_some() && !running;
             for (label, tip, act, on) in [
@@ -422,6 +422,7 @@ impl SqlTab {
             .resizable(true)
             .default_size(ui.available_height() * 0.45)
             .min_size(80.0)
+            .frame(egui::Frame::side_top_panel(ui.style()).fill(p.sidebar))
             .show(ui, |ui| {
                 self.results_ui(ui, tab_id);
             });
@@ -465,7 +466,12 @@ impl SqlTab {
         if self.active == 0 || self.active > self.results.len() {
             egui::ScrollArea::vertical().id_salt(("msgs", tab_id)).auto_shrink([false, false]).show(ui, |ui| {
                 if self.messages.is_empty() {
-                    ui.label(RichText::new("Run a query to see results here.").color(p.text_dim));
+                    crate::ui::widgets::empty_state(
+                        ui,
+                        egui_phosphor::regular::PLAY_CIRCLE,
+                        "No results yet",
+                        "Run a query to see its results here.",
+                    );
                 }
                 for m in &self.messages {
                     let color = if m.ok { p.text } else { p.danger };

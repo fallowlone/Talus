@@ -635,9 +635,9 @@ fn structure_sync_creates_missing_tables_on_target() {
     item(&h, "Structure Synchronization…").click();
     wait_for(&mut h, "sync tab", |h| has_label_containing(h, "Choose both sides"));
     // Topmost first: target connection, then source db (left), then target db (right).
-    pick(&mut h, "— choose —", "Target");
-    pick(&mut h, "— choose —", "main");
-    pick(&mut h, "— choose —", "main");
+    pick(&mut h, "Select…", "Target");
+    pick(&mut h, "Select…", "main");
+    pick(&mut h, "Select…", "main");
     click_enabled_containing(&mut h, "Compare");
     wait_for(&mut h, "plan", |h| {
         has_label_containing(h, "+ create table customers")
@@ -734,9 +734,9 @@ fn cross_engine_sync_creates_tables_with_mapped_types_and_copies_rows() {
     h.step();
     item(&h, "Structure Synchronization…").click();
     wait_for(&mut h, "sync tab", |h| has_label_containing(h, "Choose both sides"));
-    pick(&mut h, "— choose —", "PG Target");
-    pick(&mut h, "— choose —", "main");
-    pick(&mut h, "— choose —", db_name);
+    pick(&mut h, "Select…", "PG Target");
+    pick(&mut h, "Select…", "main");
+    pick(&mut h, "Select…", db_name);
     click_enabled_containing(&mut h, "Compare");
     // Cross-engine compare offers creation with mapped types instead of refusing.
     wait_for(&mut h, "transfer plan", |h| {

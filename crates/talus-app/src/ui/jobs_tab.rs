@@ -234,11 +234,11 @@ impl JobsTab {
             ui.group(|ui| {
                 egui::Grid::new("job-form").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                     let l = ui.label("Name");
-                    ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(280.0)).labelled_by(l.id);
+                    ui.add(crate::ui::widgets::field(&mut f.name).desired_width(280.0)).labelled_by(l.id);
                     ui.end_row();
                     ui.label("Connection");
                     let cname =
-                        conns.iter().find(|c| Some(c.id) == f.conn).map_or("— choose —".into(), |c| c.name.clone());
+                        conns.iter().find(|c| Some(c.id) == f.conn).map_or("Select…".into(), |c| c.name.clone());
                     super::widgets::combo("job-conn").selected_text(cname).width(280.0).show_ui(ui, |ui| {
                         for c in conns {
                             ui.selectable_value(&mut f.conn, Some(c.id), &c.name);
@@ -264,19 +264,17 @@ impl JobsTab {
                         ui.end_row();
                     }
                     let l = ui.label("Database");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut f.database).desired_width(200.0).hint_text(if f.kind == 0 {
-                            "(default)"
-                        } else {
-                            ""
-                        }),
-                    )
+                    ui.add(crate::ui::widgets::field(&mut f.database).desired_width(200.0).hint_text(if f.kind == 0 {
+                        "(default)"
+                    } else {
+                        ""
+                    }))
                     .labelled_by(l.id);
                     ui.end_row();
                     if f.kind != 0 {
                         let l = ui.label("Schema");
                         ui.add(
-                            egui::TextEdit::singleline(&mut f.schema)
+                            crate::ui::widgets::field(&mut f.schema)
                                 .desired_width(200.0)
                                 .hint_text("(PostgreSQL / SQL Server)"),
                         )
@@ -285,17 +283,17 @@ impl JobsTab {
                     }
                     if f.kind == 1 {
                         let l = ui.label("Table");
-                        ui.add(egui::TextEdit::singleline(&mut f.table).desired_width(200.0)).labelled_by(l.id);
+                        ui.add(crate::ui::widgets::field(&mut f.table).desired_width(200.0)).labelled_by(l.id);
                         ui.end_row();
                         let l = ui.label("Format");
-                        ui.add(egui::TextEdit::singleline(&mut f.format).desired_width(80.0).hint_text("csv"))
+                        ui.add(crate::ui::widgets::field(&mut f.format).desired_width(80.0).hint_text("csv"))
                             .labelled_by(l.id);
                         ui.end_row();
                     }
                     if f.kind != 0 {
                         let l = ui.label("Output file");
                         ui.add(
-                            egui::TextEdit::singleline(&mut f.path)
+                            crate::ui::widgets::field(&mut f.path)
                                 .desired_width(420.0)
                                 .hint_text("~/Documents/dump_{datetime}.sql"),
                         )
@@ -304,7 +302,7 @@ impl JobsTab {
                     }
                     if f.kind == 2 {
                         ui.label("Data");
-                        ui.checkbox(&mut f.include_data, "Include table data");
+                        crate::ui::widgets::check(ui, &mut f.include_data, "Include table data");
                         ui.end_row();
                     }
                     ui.label("Schedule");
@@ -319,7 +317,7 @@ impl JobsTab {
                             });
                         match f.schedule {
                             1 => {
-                                ui.add(egui::TextEdit::singleline(&mut f.minutes).desired_width(50.0));
+                                ui.add(crate::ui::widgets::field(&mut f.minutes).desired_width(50.0));
                                 ui.label("minutes");
                             }
                             2 | 3 => {
@@ -333,9 +331,9 @@ impl JobsTab {
                                             }
                                         });
                                 }
-                                ui.add(egui::TextEdit::singleline(&mut f.hour).desired_width(36.0));
+                                ui.add(crate::ui::widgets::field(&mut f.hour).desired_width(36.0));
                                 ui.label(":");
-                                ui.add(egui::TextEdit::singleline(&mut f.minute).desired_width(36.0));
+                                ui.add(crate::ui::widgets::field(&mut f.minute).desired_width(36.0));
                             }
                             _ => {}
                         }
@@ -379,7 +377,7 @@ impl JobsTab {
                 ui.end_row();
                 for j in jobs {
                     let mut enabled = j.enabled;
-                    if ui.checkbox(&mut enabled, "").on_hover_text("Enabled").changed() {
+                    if crate::ui::widgets::check(ui, &mut enabled, "").on_hover_text("Enabled").changed() {
                         out.push(JobsAction::SetEnabled(j.id, enabled));
                     }
                     ui.label(RichText::new(&j.name).strong());

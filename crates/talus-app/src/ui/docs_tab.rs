@@ -151,14 +151,14 @@ impl DocsTab {
         ui.horizontal(|ui| {
             ui.label("Filter");
             let f = ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
+                crate::ui::widgets::field(&mut self.filter)
                     .desired_width(280.0)
                     .hint_text(r#"{ "age": { "$gt": 30 } }"#)
                     .font(egui::TextStyle::Monospace),
             );
             ui.label("Sort");
             let s = ui.add(
-                egui::TextEdit::singleline(&mut self.sort)
+                crate::ui::widgets::field(&mut self.sort)
                     .desired_width(160.0)
                     .hint_text(r#"{ "name": 1 }"#)
                     .font(egui::TextStyle::Monospace),
@@ -268,12 +268,12 @@ impl DocsTab {
                 }
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.new_index_keys)
+                        crate::ui::widgets::field(&mut self.new_index_keys)
                             .desired_width(220.0)
                             .hint_text(r#"{ "field": 1 }"#)
                             .font(egui::TextStyle::Monospace),
                     );
-                    ui.checkbox(&mut self.new_index_unique, "unique");
+                    crate::ui::widgets::check(ui, &mut self.new_index_unique, "unique");
                     if ui
                         .add_enabled(!self.new_index_keys.trim().is_empty(), egui::Button::new("Create Index"))
                         .clicked()
@@ -319,7 +319,12 @@ impl DocsTab {
         });
 
         if self.selected.is_none() && !self.inserting {
-            ui.label(RichText::new("Select a document, or insert a new one.").color(p.text_dim));
+            crate::ui::widgets::empty_state(
+                ui,
+                egui_phosphor::regular::FILE_TEXT,
+                "Select a document",
+                "Or insert a new one.",
+            );
             return cmds;
         }
         ui.horizontal(|ui| {

@@ -62,7 +62,7 @@ impl ChartState {
             ui.label("Y");
             for &c in &nums {
                 let mut on = spec.ys.contains(&c);
-                if ui.checkbox(&mut on, &result.columns[c].name).changed() {
+                if crate::ui::widgets::check(ui, &mut on, &result.columns[c].name).changed() {
                     if on {
                         spec.ys.push(c);
                     } else {
@@ -100,6 +100,7 @@ fn plot(ui: &mut egui::Ui, id: egui::Id, data: &ChartData, kind: ChartKind) {
     let mut plot = Plot::new((id, "plot"))
         .legend(Legend::default())
         .allow_scroll(false)
+        .show_grid([false, true])
         .height(ui.available_height().max(160.0) - 8.0);
     if data.xs.is_none() {
         let l = labels.clone();

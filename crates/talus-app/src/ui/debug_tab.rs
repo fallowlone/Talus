@@ -234,8 +234,8 @@ impl DebugTab {
         egui::Grid::new("debug-params").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
             for (param, (value, null)) in target.params.iter().zip(self.args.iter_mut()) {
                 let l = ui.label(format!("{}  {}", param.name, param.type_name));
-                ui.add_enabled(!*null, egui::TextEdit::singleline(value).desired_width(220.0)).labelled_by(l.id);
-                ui.checkbox(null, "NULL");
+                ui.add_enabled(!*null, crate::ui::widgets::field(value).desired_width(220.0)).labelled_by(l.id);
+                crate::ui::widgets::check(ui, null, "NULL");
                 ui.end_row();
             }
         });
@@ -309,7 +309,7 @@ impl DebugTab {
                             let editing = self.editing.as_ref().is_some_and(|(n, l, _)| *n == v.name && *l == v.line);
                             if editing {
                                 let Some((name, line, buf)) = self.editing.as_mut() else { continue };
-                                let r = ui.add(egui::TextEdit::singleline(buf).desired_width(140.0));
+                                let r = ui.add(crate::ui::widgets::field(buf).desired_width(140.0));
                                 r.request_focus();
                                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                     let op = DebugOp::SetValue { name: name.clone(), line: *line, value: buf.clone() };

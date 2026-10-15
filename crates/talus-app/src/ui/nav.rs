@@ -93,8 +93,7 @@ pub fn show(ui: &mut egui::Ui, ctx: NavCtx<'_>, actions: &mut Vec<Action>) {
     let filter = ctx.filter.trim().to_lowercase();
     if ctx.connections.is_empty() {
         ui.vertical_centered(|ui| {
-            ui.add_space(40.0);
-            ui.label(RichText::new("No connections yet").color(p.text_dim));
+            crate::ui::widgets::empty_state(ui, icons::PLUGS, "No connections yet", "Add one to start exploring.");
             if ui.button(format!("{} New Connection", icons::PLUGS)).clicked() {
                 actions.push(Action::NewConnection);
             }

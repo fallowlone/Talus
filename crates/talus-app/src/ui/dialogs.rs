@@ -162,13 +162,13 @@ impl PasswordPrompt {
             }
             let l = ui.label("Password");
             let r = ui
-                .add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(f32::INFINITY))
+                .add(crate::ui::widgets::field(&mut self.password).password(true).desired_width(f32::INFINITY))
                 .labelled_by(l.id);
             if !self.focus_requested {
                 r.request_focus();
                 self.focus_requested = true;
             }
-            ui.checkbox(&mut self.save, "Save in Keychain");
+            crate::ui::widgets::check(ui, &mut self.save, "Save in Keychain");
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -189,36 +189,55 @@ impl PasswordPrompt {
 pub fn settings_ui(ctx: &egui::Context, draft: &mut Settings, open: &mut bool) -> Option<Settings> {
     let mut saved = None;
     let mut keep_open = *open;
-    egui::Window::new("Settings").open(&mut keep_open).collapsible(false).resizable(false).default_width(420.0).show(
+    egui::Window::new("Settings").open(&mut keep_open).collapsible(false).resizable(false).default_width(440.0).show(
         ctx,
         |ui| {
-            egui::Grid::new("settings-grid").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-                ui.label("Theme");
+            let p = theme::current(ui.ctx());
+            let row = |ui: &mut egui::Ui, title: &str, hint: &str, control: &mut dyn FnMut(&mut egui::Ui)| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut draft.theme, Theme::Dark, "Dark");
-                    ui.selectable_value(&mut draft.theme, Theme::Light, "Light");
+                    ui.vertical(|ui| {
+                        ui.label(title);
+                        if !hint.is_empty() {
+                            ui.label(egui::RichText::new(hint).size(11.5).color(p.text_faint));
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| control(ui));
                 });
-                ui.end_row();
-                ui.label("Editor font size");
-                ui.add(egui::Slider::new(&mut draft.editor_font_size, 9.0..=24.0).step_by(1.0));
-                ui.end_row();
-                ui.label("Records per page");
-                ui.add(egui::DragValue::new(&mut draft.page_size).range(10..=100_000));
-                ui.end_row();
-                ui.label("Max result rows");
-                ui.add(egui::DragValue::new(&mut draft.max_result_rows).range(100..=5_000_000))
-                    .on_hover_text("Rows kept per result set in the query editor");
-                ui.end_row();
-                ui.label("History entries shown");
-                ui.add(egui::DragValue::new(&mut draft.history_limit).range(100..=1_000_000));
-                ui.end_row();
-                ui.label("Restore tabs on launch");
-                ui.checkbox(&mut draft.restore_session, "");
-                ui.end_row();
+                ui.add_space(6.0);
+            };
+            row(ui, "Theme", "", &mut |ui| {
+                super::widgets::segmented(ui, &mut draft.theme, &[(Theme::Light, "Light"), (Theme::Dark, "Dark")]);
             });
-            ui.separator();
+            row(ui, "Editor font size", "Query editor and grid", &mut |ui| {
+                let mut v = f64::from(draft.editor_font_size);
+                if super::widgets::stepper(ui, &mut v, 9.0..=24.0, 1.0, " pt").changed() {
+                    draft.editor_font_size = v as f32;
+                }
+            });
+            row(ui, "Records per page", "Rows loaded when browsing a table", &mut |ui| {
+                let mut v = draft.page_size as f64;
+                if super::widgets::stepper(ui, &mut v, 10.0..=100_000.0, 100.0, "").changed() {
+                    draft.page_size = v as _;
+                }
+            });
+            row(ui, "Max result rows", "Kept per result set in the query editor", &mut |ui| {
+                let mut v = draft.max_result_rows as f64;
+                if super::widgets::stepper(ui, &mut v, 100.0..=5_000_000.0, 1_000.0, "").changed() {
+                    draft.max_result_rows = v as _;
+                }
+            });
+            row(ui, "History entries shown", "", &mut |ui| {
+                let mut v = draft.history_limit as f64;
+                if super::widgets::stepper(ui, &mut v, 100.0..=1_000_000.0, 100.0, "").changed() {
+                    draft.history_limit = v as _;
+                }
+            });
+            row(ui, "Restore tabs on launch", "Reopen the previous session", &mut |ui| {
+                super::widgets::toggle(ui, &mut draft.restore_session, "Restore tabs on launch");
+            });
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if ui.add(theme::primary_button(theme::current(ui.ctx()), "Save")).clicked() {
+                if ui.add(theme::primary_button(p, "Save")).clicked() {
                     saved = Some(draft.clone().sanitized());
                 }
                 if ui.button("Reset to Defaults").clicked() {

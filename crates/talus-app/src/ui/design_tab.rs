@@ -226,69 +226,70 @@ impl DesignTab {
         let p = theme::current(ui.ctx());
         let mut action = None;
         let busy = self.loading.is_some() || self.saving.is_some();
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!busy, egui::Button::new(format!("{} Add Field", icons::PLUS))).clicked() {
-                self.add_field();
+        crate::ui::widgets::card(ui, egui::Margin::same(12), |ui| {
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!busy, egui::Button::new(format!("{} Add Field", icons::PLUS))).clicked() {
+                    self.add_field();
+                }
+                let can_delete = self.selected.is_some() && !busy;
+                if ui.add_enabled(can_delete, egui::Button::new(format!("{} Delete Field", icons::MINUS))).clicked()
+                    && let Some(i) = self.selected.take()
+                    && i < self.rows.len()
+                {
+                    self.rows.remove(i);
+                }
+                ui.separator();
+                let plan = self.plan();
+                let can_save = !busy && self.is_dirty() && plan.as_ref().is_ok_and(|p| !p.statements.is_empty());
+                if ui
+                    .add_enabled(
+                        can_save,
+                        // Pending changes make Save the screen's primary action.
+                        if can_save {
+                            theme::primary_button(p, format!("{} Save", icons::FLOPPY_DISK))
+                        } else {
+                            egui::Button::new(format!("{} Save", icons::FLOPPY_DISK))
+                        },
+                    )
+                    .on_hover_text("Apply the SQL shown below (⌘S)")
+                    .clicked()
+                    && let Ok(plan) = plan
+                {
+                    action = Some(DesignAction::Save(plan));
+                }
+                if busy {
+                    ui.spinner();
+                }
+                if let Some(i) = &self.info {
+                    ui.label(RichText::new(i).color(p.ok));
+                }
+            });
+            if let Some(e) = &self.error {
+                ui.label(RichText::new(format!("{} {e}", icons::WARNING_CIRCLE)).color(p.danger));
             }
-            let can_delete = self.selected.is_some() && !busy;
-            if ui.add_enabled(can_delete, egui::Button::new(format!("{} Delete Field", icons::MINUS))).clicked()
-                && let Some(i) = self.selected.take()
-                && i < self.rows.len()
-            {
-                self.rows.remove(i);
-            }
-            ui.separator();
-            let plan = self.plan();
-            let can_save = !busy && self.is_dirty() && plan.as_ref().is_ok_and(|p| !p.statements.is_empty());
-            if ui
-                .add_enabled(
-                    can_save,
-                    // Pending changes make Save the screen's primary action.
-                    if can_save {
-                        theme::primary_button(p, format!("{} Save", icons::FLOPPY_DISK))
-                    } else {
-                        egui::Button::new(format!("{} Save", icons::FLOPPY_DISK))
-                    },
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                let l = ui.label("Table name");
+                let editable = self.existing.is_none();
+                ui.add_enabled(
+                    editable,
+                    crate::ui::widgets::field(&mut self.table_name).desired_width(260.0).hint_text("new_table"),
                 )
-                .on_hover_text("Apply the SQL shown below (⌘S)")
-                .clicked()
-                && let Ok(plan) = plan
-            {
-                action = Some(DesignAction::Save(plan));
-            }
-            if busy {
-                ui.spinner();
-            }
-            if let Some(i) = &self.info {
-                ui.label(RichText::new(i).color(p.ok));
-            }
+                .labelled_by(l.id);
+                if let Some(s) = &self.schema {
+                    ui.label(RichText::new(format!("in schema {s}")).color(p.text_dim));
+                } else {
+                    ui.label(RichText::new(format!("in {}", self.database)).color(p.text_dim));
+                }
+            });
         });
-        if let Some(e) = &self.error {
-            ui.label(RichText::new(format!("{} {e}", icons::WARNING_CIRCLE)).color(p.danger));
-        }
-        ui.separator();
-        ui.horizontal(|ui| {
-            let l = ui.label("Table name");
-            let editable = self.existing.is_none();
-            ui.add_enabled(
-                editable,
-                egui::TextEdit::singleline(&mut self.table_name).desired_width(260.0).hint_text("new_table"),
-            )
-            .labelled_by(l.id);
-            if let Some(s) = &self.schema {
-                ui.label(RichText::new(format!("in schema {s}")).color(p.text_dim));
-            } else {
-                ui.label(RichText::new(format!("in {}", self.database)).color(p.text_dim));
-            }
-        });
+
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            for (sec, label) in
-                [(Section::Fields, "Fields"), (Section::Indexes, "Indexes"), (Section::ForeignKeys, "Foreign Keys")]
-            {
-                ui.selectable_value(&mut self.section, sec, label);
-            }
-        });
+        crate::ui::widgets::segmented(
+            ui,
+            &mut self.section,
+            &[(Section::Fields, "Fields"), (Section::Indexes, "Indexes"), (Section::ForeignKeys, "Foreign Keys")],
+        );
 
         egui::Panel::bottom(egui::Id::new(("design-sql", tab_id)))
             .resizable(true)
@@ -353,14 +354,14 @@ impl DesignTab {
                     {
                         self.selected = Some(i);
                     }
-                    ui.checkbox(&mut row.def.primary_key, "").on_hover_text("Primary key");
-                    let name = ui.add(egui::TextEdit::singleline(&mut row.def.name).desired_width(170.0));
+                    crate::ui::widgets::check(ui, &mut row.def.primary_key, "").on_hover_text("Primary key");
+                    let name = ui.add(crate::ui::widgets::field(&mut row.def.name).desired_width(170.0));
                     if name.gained_focus() {
                         self.selected = Some(i);
                     }
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::TextEdit::singleline(&mut row.def.data_type)
+                            crate::ui::widgets::field(&mut row.def.data_type)
                                 .desired_width(150.0)
                                 .font(egui::TextStyle::Monospace),
                         );
@@ -374,13 +375,13 @@ impl DesignTab {
                         });
                     });
                     let mut not_null = !row.def.nullable;
-                    if ui.checkbox(&mut not_null, "").changed() {
+                    if crate::ui::widgets::check(ui, &mut not_null, "").changed() {
                         row.def.nullable = !not_null;
                     }
                     let mut default = row.def.default.clone().unwrap_or_default();
                     if ui
                         .add(
-                            egui::TextEdit::singleline(&mut default)
+                            crate::ui::widgets::field(&mut default)
                                 .desired_width(160.0)
                                 .font(egui::TextStyle::Monospace)
                                 .hint_text("SQL expression"),
@@ -424,9 +425,9 @@ impl DesignTab {
                     }
                     ui.end_row();
                     for (i, ix) in self.indexes.iter_mut().enumerate() {
-                        ui.add(egui::TextEdit::singleline(&mut ix.name).desired_width(170.0));
+                        ui.add(crate::ui::widgets::field(&mut ix.name).desired_width(170.0));
                         columns_menu(ui, egui::Id::new(("ix-cols", tab_id, i)), &mut ix.columns, &names);
-                        ui.checkbox(&mut ix.unique, "");
+                        crate::ui::widgets::check(ui, &mut ix.unique, "");
                         if ui.button(icons::TRASH).on_hover_text("Delete index").clicked() {
                             remove = Some(i);
                         }
@@ -467,16 +468,16 @@ impl DesignTab {
                     }
                     ui.end_row();
                     for (i, fk) in self.fks.iter_mut().enumerate() {
-                        ui.add(egui::TextEdit::singleline(&mut fk.name).desired_width(150.0));
+                        ui.add(crate::ui::widgets::field(&mut fk.name).desired_width(150.0));
                         columns_menu(ui, egui::Id::new(("fk-cols", tab_id, i)), &mut fk.columns, &names);
                         ui.add(
-                            egui::TextEdit::singleline(&mut fk.ref_table)
+                            crate::ui::widgets::field(&mut fk.ref_table)
                                 .desired_width(150.0)
                                 .hint_text("table or schema.table"),
                         );
                         let mut refs = fk.ref_columns.join(", ");
                         if ui
-                            .add(egui::TextEdit::singleline(&mut refs).desired_width(150.0).hint_text("col1, col2"))
+                            .add(crate::ui::widgets::field(&mut refs).desired_width(150.0).hint_text("col1, col2"))
                             .changed()
                         {
                             fk.ref_columns =
@@ -505,7 +506,7 @@ fn columns_menu(ui: &mut egui::Ui, id: egui::Id, selected: &mut Vec<String>, all
         ui.menu_button(label, |ui| {
             for c in all {
                 let mut on = selected.contains(c);
-                if ui.checkbox(&mut on, c).changed() {
+                if crate::ui::widgets::check(ui, &mut on, c).changed() {
                     let mut next: Vec<String> = selected.iter().filter(|x| *x != c).cloned().collect();
                     if on {
                         next.push(c.clone());

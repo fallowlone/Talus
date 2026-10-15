@@ -144,16 +144,16 @@ impl UsersTab {
             ui.group(|ui| {
                 egui::Grid::new(("new-user", tab_id)).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                     let l = ui.label("Name");
-                    ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(220.0)).labelled_by(l.id);
+                    ui.add(crate::ui::widgets::field(&mut f.name).desired_width(220.0)).labelled_by(l.id);
                     ui.end_row();
                     if is_mysql {
                         let l = ui.label("Host");
-                        ui.add(egui::TextEdit::singleline(&mut f.host).hint_text("%").desired_width(220.0))
+                        ui.add(crate::ui::widgets::field(&mut f.host).hint_text("%").desired_width(220.0))
                             .labelled_by(l.id);
                         ui.end_row();
                     }
                     let l = ui.label("Password");
-                    ui.add(egui::TextEdit::singleline(&mut f.password).password(true).desired_width(220.0))
+                    ui.add(crate::ui::widgets::field(&mut f.password).password(true).desired_width(220.0))
                         .labelled_by(l.id);
                     ui.end_row();
                 });
@@ -220,7 +220,12 @@ impl UsersTab {
                 ui.spinner();
             }
             Loadable::NotLoaded => {
-                ui.label(RichText::new("Select an account to see its grants.").color(p.text_dim));
+                crate::ui::widgets::empty_state(
+                    ui,
+                    egui_phosphor::regular::USER,
+                    "Select an account",
+                    "Its grants will show here.",
+                );
             }
         }
         out
@@ -252,12 +257,12 @@ impl UsersTab {
             });
             egui::Grid::new(("grant-target", tab_id)).num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
                 let l = ui.label("Database");
-                ui.add(egui::TextEdit::singleline(&mut g.database).desired_width(180.0)).labelled_by(l.id);
+                ui.add(crate::ui::widgets::field(&mut g.database).desired_width(180.0)).labelled_by(l.id);
                 ui.end_row();
                 if g.kind >= 1 && engine != Engine::MySql {
                     let l = ui.label("Schema");
                     ui.add(
-                        egui::TextEdit::singleline(&mut g.schema)
+                        crate::ui::widgets::field(&mut g.schema)
                             .hint_text(engine.default_schema().unwrap_or(""))
                             .desired_width(180.0),
                     )
@@ -266,7 +271,7 @@ impl UsersTab {
                 }
                 if g.kind == 2 {
                     let l = ui.label("Table");
-                    ui.add(egui::TextEdit::singleline(&mut g.table).desired_width(180.0)).labelled_by(l.id);
+                    ui.add(crate::ui::widgets::field(&mut g.table).desired_width(180.0)).labelled_by(l.id);
                     ui.end_row();
                 }
             });
@@ -290,7 +295,7 @@ impl UsersTab {
             ui.horizontal_wrapped(|ui| {
                 for pr in offered {
                     let mut on = g.chosen.iter().any(|c| c == pr);
-                    if ui.checkbox(&mut on, *pr).changed() {
+                    if crate::ui::widgets::check(ui, &mut on, *pr).changed() {
                         if on {
                             g.chosen.push((*pr).to_string());
                         } else {

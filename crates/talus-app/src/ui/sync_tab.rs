@@ -81,7 +81,7 @@ fn scope_picker(
         let name = side
             .conn
             .and_then(|c| connections.iter().find(|x| x.id == c))
-            .map_or("— choose —".into(), |c| c.name.clone());
+            .map_or("Select…".into(), |c| c.name.clone());
         super::widgets::combo((id, "conn")).selected_text(name).width(200.0).show_ui(ui, |ui| {
             for c in connections {
                 if ui.selectable_label(side.conn == Some(c.id), &c.name).clicked() {
@@ -96,7 +96,7 @@ fn scope_picker(
         let st = side.conn.and_then(|c| states.get(&c));
         ui.label("Database");
         super::widgets::combo((id, "db"))
-            .selected_text(side.database.clone().unwrap_or_else(|| "— choose —".into()))
+            .selected_text(side.database.clone().unwrap_or_else(|| "Select…".into()))
             .width(200.0)
             .show_ui(ui, |ui| {
                 for d in st.map(|s| s.databases.as_slice()).unwrap_or_default() {
@@ -228,11 +228,18 @@ impl SyncTab {
         let p = theme::current(ui.ctx());
         let mut out = Vec::new();
         let mut changed = false;
+        ui.add_space(4.0);
         ui.columns(2, |cols| {
-            cols[0].label(RichText::new("Source").strong());
-            changed |= scope_picker(&mut cols[0], "sync-src", &mut self.source, connections, states);
-            cols[1].label(RichText::new("Target").strong());
-            changed |= scope_picker(&mut cols[1], "sync-dst", &mut self.target, connections, states);
+            for (i, (title, id, scope)) in
+                [("Source", "sync-src", &mut self.source), ("Target", "sync-dst", &mut self.target)]
+                    .into_iter()
+                    .enumerate()
+            {
+                crate::ui::widgets::card(&mut cols[i], egui::Margin::same(14), |ui| {
+                    ui.label(RichText::new(title).font(theme::semibold(13.5)));
+                    changed |= scope_picker(ui, id, scope, connections, states);
+                });
+            }
         });
         if changed {
             self.plan = None;
@@ -252,7 +259,12 @@ impl SyncTab {
             {
                 out.push(SyncAction::Compare);
             }
-            if ui.checkbox(&mut self.include_drops, "Include drops (tables/columns missing in source)").changed()
+            if crate::ui::widgets::check(
+                ui,
+                &mut self.include_drops,
+                "Include drops (tables/columns missing in source)",
+            )
+            .changed()
                 && self.plan.is_some()
             {
                 out.push(SyncAction::Compare);
@@ -358,10 +370,10 @@ impl SyncTab {
                         if ui.small_button("None").clicked() {
                             self.data_tables.iter_mut().for_each(|d| d.selected = false);
                         }
-                        ui.checkbox(&mut self.delete_missing, "Delete rows missing in source");
+                        crate::ui::widgets::check(ui, &mut self.delete_missing, "Delete rows missing in source");
                     });
                     for d in &mut self.data_tables {
-                        ui.checkbox(&mut d.selected, &d.name);
+                        crate::ui::widgets::check(ui, &mut d.selected, &d.name);
                     }
                     let tables: Vec<String> =
                         self.data_tables.iter().filter(|d| d.selected).map(|d| d.name.clone()).collect();
