@@ -1,5 +1,6 @@
 //! Local port forwards that carry a network engine's connection: through an SSH server
-//! (`ssh::open_tunnel`) or through an HTTP proxy with the `CONNECT` method (this module).
+//! (`ssh::open_tunnel`), through an HTTP proxy with the `CONNECT` method (this module) or through a PHP
+//! script on a web host (`php_tunnel`).
 //! Either way the engine connects to `127.0.0.1:<local_port>`.
 
 use std::path::Path;
@@ -39,7 +40,7 @@ impl Tunnel {
     }
 }
 
-/// Opens the tunnel `cfg` asks for (SSH or HTTP proxy) to `cfg.host:cfg.port`; `None` when it uses neither.
+/// Opens the tunnel `cfg` asks for (SSH, HTTP proxy or PHP script) to `cfg.host:cfg.port`; `None` when it uses neither.
 pub async fn open_for(
     cfg: &ConnectionConfig,
     secret: Option<&Secret>,
@@ -51,6 +52,9 @@ pub async fn open_for(
     }
     if let Some(proxy) = &cfg.http_proxy {
         return open_http_tunnel(proxy, secret, &cfg.host, cfg.port, timeout).await.map(Some);
+    }
+    if let Some(php) = &cfg.php_tunnel {
+        return crate::php_tunnel::open_php_tunnel(php, secret, &cfg.host, cfg.port, timeout).await.map(Some);
     }
     Ok(None)
 }

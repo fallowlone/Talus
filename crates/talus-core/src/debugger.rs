@@ -14,7 +14,7 @@ use crate::secret::Secret;
 use crate::sql::Dialect;
 
 /// A routine as the debugger needs it: what to call and the source its line numbers refer to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DebugTarget {
     pub oid: u32,
     /// `schema.name(arg types)` for display.
@@ -26,12 +26,25 @@ pub struct DebugTarget {
     pub params: Vec<DebugParam>,
     /// Routine body; debugger line numbers count its lines from 1.
     pub source: String,
+    /// Every parameter in call order, with its mode (Oracle builds a block with a variable for each).
+    pub args: Vec<DebugArg>,
+    /// Oracle function return type.
+    pub returns: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DebugParam {
     pub name: String,
     pub type_name: String,
+}
+
+/// One parameter of an Oracle routine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugArg {
+    pub name: String,
+    pub type_name: String,
+    /// `I` in, `O` out, `B` in/out.
+    pub mode: char,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,8 +200,16 @@ async fn require_debugger(s: &mut Session) -> DbResult<()> {
     Ok(())
 }
 
-/// Reads what the debugger needs about routine `oid`.
+/// Reads what the debugger needs about routine `oid` (a `pg_proc` OID, or an Oracle `OBJECT_ID`).
 pub async fn describe(s: &mut Session, oid: u32) -> DbResult<DebugTarget> {
+    match s.engine() {
+        Engine::Postgres => describe_pg(s, oid).await,
+        Engine::Oracle => crate::ora_debugger::describe(s, oid).await,
+        e => Err(DbError::Invalid(format!("{} has no debugger", e.label()))),
+    }
+}
+
+async fn describe_pg(s: &mut Session, oid: u32) -> DbResult<DebugTarget> {
     let r = rows(
         s,
         &format!(
@@ -236,7 +257,80 @@ pub async fn describe(s: &mut Session, oid: u32) -> DbResult<DebugTarget> {
         is_procedure: cell(r, 2) == "p",
         params,
         source: cell(r, 4),
+        ..Default::default()
     })
+}
+
+/// A running debug session of either engine.
+pub enum Debugger {
+    Pg(PgDebugger),
+    Oracle(Box<crate::ora_debugger::OraDebugger>),
+}
+
+impl Debugger {
+    /// Starts `target` with `args` and pauses at its first statement.
+    pub async fn start(
+        cfg: &ConnectionConfig,
+        password: Option<&Secret>,
+        database: Option<&str>,
+        target: &DebugTarget,
+        args: &[Option<String>],
+        breakpoints: &[i32],
+    ) -> DbResult<(Self, DebugEvent)> {
+        match cfg.engine {
+            Engine::Oracle => {
+                let (d, ev) =
+                    crate::ora_debugger::OraDebugger::start(cfg, password, database, target, args, breakpoints).await?;
+                Ok((Debugger::Oracle(Box::new(d)), ev))
+            }
+            _ => {
+                let (d, ev) = PgDebugger::start(cfg, password, database, target, args, breakpoints).await?;
+                Ok((Debugger::Pg(d), ev))
+            }
+        }
+    }
+
+    pub fn target_cancel(&self) -> CancelHandle {
+        match self {
+            Debugger::Pg(d) => d.target_cancel(),
+            Debugger::Oracle(d) => d.target_cancel(),
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        match self {
+            Debugger::Pg(d) => d.is_running(),
+            Debugger::Oracle(d) => d.is_running(),
+        }
+    }
+
+    pub async fn step(&mut self, step: Step) -> DbResult<DebugEvent> {
+        match self {
+            Debugger::Pg(d) => d.step(step).await,
+            Debugger::Oracle(d) => d.step(step).await,
+        }
+    }
+
+    pub async fn set_breakpoint(&mut self, func: u32, line: i32, on: bool) -> DbResult<()> {
+        match self {
+            Debugger::Pg(d) => d.set_breakpoint(func, line, on).await,
+            Debugger::Oracle(d) => d.set_breakpoint(func, line, on).await,
+        }
+    }
+
+    pub async fn set_value(&mut self, name: &str, line: i32, value: &str) -> DbResult<Snapshot> {
+        match self {
+            Debugger::Pg(d) => d.set_value(name, line, value).await,
+            Debugger::Oracle(d) => d.set_value(name, line, value).await,
+        }
+    }
+
+    pub async fn stop(self) -> DbResult<()> {
+        match self {
+            Debugger::Pg(d) => d.stop().await,
+            Debugger::Oracle(d) => d.stop().await,
+        }
+    }
 }
 
 impl PgDebugger {
@@ -506,6 +600,7 @@ mod tests {
                 DebugParam { name: "label".into(), type_name: "text".into() },
             ],
             source: String::new(),
+            ..Default::default()
         }
     }
 

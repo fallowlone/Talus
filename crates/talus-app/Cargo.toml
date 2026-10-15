@@ -21,6 +21,8 @@ egui_plot.workspace = true
 egui-phosphor = "0.14.0"
 rfd.workspace = true
 chrono.workspace = true
+ab_glyph.workspace = true
+epaint_default_fonts.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 serde.workspace = true
@@ -32,3 +34,4 @@ muda = "0.21.2"
 
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe", "wgpu", "snapshot"] }
+talus-server.workspace = true

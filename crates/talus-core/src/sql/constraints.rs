@@ -113,6 +113,42 @@ pub fn fk_clause(d: Dialect, fk: &FkDef) -> DbResult<String> {
             fk.ref_columns.len()
         )));
     }
+    if d.0 == Engine::Oracle {
+        // Oracle has no ON UPDATE actions, and ON DELETE is CASCADE, SET NULL or (by default) none.
+        if !matches!(act("UPDATE", &fk.on_update)?, "NO ACTION" | "RESTRICT") {
+            return Err(DbError::Invalid("Oracle foreign keys have no ON UPDATE actions".into()));
+        }
+        let on_delete = match act("DELETE", &fk.on_delete)? {
+            "CASCADE" => " ON DELETE CASCADE",
+            "SET NULL" => " ON DELETE SET NULL",
+            "NO ACTION" | "RESTRICT" => "",
+            other => return Err(DbError::Invalid(format!("Oracle does not support ON DELETE {other}"))),
+        };
+        return Ok(format!(
+            "CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}){on_delete}",
+            d.quote_ident(&fk.name)?,
+            quote_list(d, &fk.columns)?,
+            quote_ref_table(d, &fk.ref_table)?,
+            quote_list(d, &fk.ref_columns)?,
+        ));
+    }
+    if d.0 == Engine::Snowflake {
+        // Snowflake does not enforce foreign keys and takes no referential actions; the clause
+        // stays informational.
+        if !matches!(act("UPDATE", &fk.on_update)?, "NO ACTION" | "RESTRICT") {
+            return Err(DbError::Invalid("Snowflake foreign keys have no ON UPDATE actions".into()));
+        }
+        if !matches!(act("DELETE", &fk.on_delete)?, "NO ACTION" | "RESTRICT") {
+            return Err(DbError::Invalid("Snowflake foreign keys have no ON DELETE actions".into()));
+        }
+        return Ok(format!(
+            "CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) NOT ENFORCED",
+            d.quote_ident(&fk.name)?,
+            quote_list(d, &fk.columns)?,
+            quote_ref_table(d, &fk.ref_table)?,
+            quote_list(d, &fk.ref_columns)?,
+        ));
+    }
     Ok(format!(
         "CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON UPDATE {} ON DELETE {}",
         d.quote_ident(&fk.name)?,
@@ -128,7 +164,7 @@ pub fn fk_clause(d: Dialect, fk: &FkDef) -> DbResult<String> {
 fn index_name(d: Dialect, table: &ObjectRef, name: &str) -> DbResult<String> {
     let n = d.quote_ident(name)?;
     let schema = match d.0 {
-        Engine::Postgres => table.schema.as_deref(),
+        Engine::Postgres | Engine::Oracle | Engine::Snowflake => table.schema.as_deref(),
         Engine::Sqlite => Some(table.database.as_str()).filter(|x| !x.is_empty()),
         Engine::MySql | Engine::SqlServer | Engine::Redis | Engine::MongoDb => None,
     };
@@ -139,6 +175,12 @@ fn index_name(d: Dialect, table: &ObjectRef, name: &str) -> DbResult<String> {
 }
 
 pub fn create_index(d: Dialect, table: &ObjectRef, ix: &IndexDef) -> DbResult<String> {
+    if d.0 == Engine::Snowflake {
+        return Err(DbError::Invalid(
+            "Snowflake has no secondary indexes (micropartitioning replaces them); declare UNIQUE constraints instead"
+                .into(),
+        ));
+    }
     let target = match d.0 {
         Engine::Sqlite => d.quote_ident(&table.name)?,
         _ => d.qualified(table)?,
@@ -147,7 +189,8 @@ pub fn create_index(d: Dialect, table: &ObjectRef, ix: &IndexDef) -> DbResult<St
         Engine::Postgres | Engine::MySql | Engine::SqlServer | Engine::Redis | Engine::MongoDb => {
             d.quote_ident(&ix.name)?
         }
-        Engine::Sqlite => index_name(d, table, &ix.name)?,
+        // Oracle indexes live in the owner's schema and are created in the session's unless qualified.
+        Engine::Oracle | Engine::Sqlite | Engine::Snowflake => index_name(d, table, &ix.name)?,
     };
     Ok(format!(
         "CREATE {}INDEX {name} ON {target} ({})",
@@ -237,7 +280,7 @@ pub fn diff(
                         .into(),
                 ));
             }
-            Engine::Postgres | Engine::SqlServer => {
+            Engine::Postgres | Engine::SqlServer | Engine::Oracle | Engine::Snowflake => {
                 format!("ALTER TABLE {t} DROP CONSTRAINT {}", d.quote_ident(&o.name)?)
             }
             Engine::MySql => format!("ALTER TABLE {t} DROP FOREIGN KEY {}", d.quote_ident(&o.name)?),
@@ -251,7 +294,12 @@ pub fn diff(
                 && i.columns == map(&o.columns)
         });
         if !unchanged {
-            plan.drops.push(drop_index(d, table, &o.name)?);
+            // Snowflake "indexes" are UNIQUE constraints; only those exist there.
+            if d.0 == Engine::Snowflake {
+                plan.drops.push(format!("ALTER TABLE {t} DROP CONSTRAINT {}", d.quote_ident(&o.name)?));
+            } else {
+                plan.drops.push(drop_index(d, table, &o.name)?);
+            }
         }
     }
     for i in new_ix {
@@ -260,7 +308,15 @@ pub fn diff(
         let unchanged =
             existing.is_some_and(|o| i.name == o.name && i.unique == o.unique && i.columns == map(&o.columns));
         if !unchanged {
-            plan.creates.push(create_index(d, table, i)?);
+            if d.0 == Engine::Snowflake && i.unique {
+                plan.creates.push(format!(
+                    "ALTER TABLE {t} ADD CONSTRAINT {} UNIQUE ({}) NOT ENFORCED",
+                    d.quote_ident(&i.name)?,
+                    quote_list(d, &i.columns)?
+                ));
+            } else {
+                plan.creates.push(create_index(d, table, i)?);
+            }
         }
     }
     for f in new_fk {

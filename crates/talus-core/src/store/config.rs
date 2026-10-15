@@ -43,6 +43,10 @@ impl AppPaths {
     pub fn known_hosts_file(&self) -> PathBuf {
         self.root.join("known_hosts")
     }
+    /// Link to the shared workspace (server, user, workspace, last seen revisions).
+    pub fn workspace_file(&self) -> PathBuf {
+        self.root.join("workspace.json")
+    }
     pub fn jobs_file(&self) -> PathBuf {
         self.root.join("jobs.json")
     }

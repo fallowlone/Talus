@@ -84,6 +84,25 @@ fn gen_for(engine: Engine, c: &ColumnInfo) -> Gen {
     {
         return Gen::Unsupported;
     }
+    if engine == Engine::Oracle && matches!(t.as_str(), "raw" | "long raw" | "bfile" | "xmltype" | "rowid" | "urowid") {
+        return Gen::Unsupported;
+    }
+    if matches!(engine, Engine::Oracle | Engine::Snowflake) {
+        // NUMBER(p) / NUMBER(*,0) hold whole numbers; the rest of the NUMBER family is Decimal below.
+        let d = c.data_type.to_ascii_lowercase().replace(' ', "");
+        if t == "number" && (d == "number(*,0)" || (d.starts_with("number(") && !d.contains(','))) {
+            return Gen::Int { lo: 0, hi: 1_000_000 };
+        }
+    }
+    if engine == Engine::Snowflake {
+        // Semi-structured columns take JSON text; spatial ones need constructors the filler has not got.
+        if matches!(t.as_str(), "variant" | "object" | "array") {
+            return Gen::Json;
+        }
+        if matches!(t.as_str(), "geography" | "geometry") {
+            return Gen::Unsupported;
+        }
+    }
     if t == "tinyint" && c.data_type.contains("(1)") || has(&["bool", "bit"]) {
         return Gen::Bool;
     }
@@ -168,7 +187,7 @@ fn date_of(r: &mut Rng) -> (i64, i64, i64) {
     (r.range(2015, 2025), r.range(1, 12), r.range(1, 28))
 }
 
-fn value(g: Gen, c: &ColumnInfo, r: &mut Rng, seq: u64) -> Option<String> {
+fn value(engine: Engine, g: Gen, c: &ColumnInfo, r: &mut Rng, seq: u64) -> Option<String> {
     if let Some(vals) = enum_values(&c.data_type) {
         return Some(vals[r.below(vals.len() as u64) as usize].clone());
     }
@@ -178,7 +197,9 @@ fn value(g: Gen, c: &ColumnInfo, r: &mut Rng, seq: u64) -> Option<String> {
         Gen::Bool => r.below(2).to_string(),
         Gen::Date => {
             let (y, m, d) = date_of(r);
-            format!("{y:04}-{m:02}-{d:02}")
+            // An Oracle DATE always carries a time, and its session format is `YYYY-MM-DD HH24:MI:SS`.
+            let time = if engine == Engine::Oracle { " 00:00:00" } else { "" };
+            format!("{y:04}-{m:02}-{d:02}{time}")
         }
         Gen::DateTime => {
             let (y, m, d) = date_of(r);
@@ -276,7 +297,7 @@ pub fn generate(
                 if c.nullable && !is_unique && rng.below(20) == 0 {
                     return None;
                 }
-                let mut v = value(*g, c, &mut rng, seq);
+                let mut v = value(engine, *g, c, &mut rng, seq);
                 if is_unique && *g == Gen::Text {
                     // Guarantee uniqueness by suffixing the sequence number inside the length limit.
                     let tail = format!("-{seq}");
@@ -322,6 +343,7 @@ pub async fn fill_table(s: &mut Session, obj: &ObjectRef, rows: usize, seed: u64
         let (pt, pc) = (d.qualified(&parent)?, d.quote_ident(&fk.ref_columns[0])?);
         let sql = match engine {
             Engine::SqlServer => format!("SELECT TOP ({FK_POOL}) {pc} FROM {pt}"),
+            Engine::Oracle => format!("SELECT {pc} FROM {pt} FETCH FIRST {FK_POOL} ROWS ONLY"),
             _ => format!("SELECT {pc} FROM {pt} LIMIT {FK_POOL}"),
         };
         let out = s.run_script(&sql, &ScriptOptions::default()).await;

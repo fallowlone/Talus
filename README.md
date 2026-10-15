@@ -6,7 +6,7 @@
 
 **A fast, native database client for macOS, written entirely in Rust.**
 
-One window for SQLite, PostgreSQL, MySQL / MariaDB, SQL Server, Redis and MongoDB:
+One window for SQLite, PostgreSQL, MySQL / MariaDB, SQL Server, Oracle, Snowflake, Redis and MongoDB:
 a quiet, monochrome interface, with no trial, no licence keys and no edition gating.
 
 [![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-000000)](Cargo.toml)
@@ -47,12 +47,12 @@ a quiet, monochrome interface, with no trial, no licence keys and no edition gat
 
 | Area | What you get |
 |---|---|
-| **Connections** | Keychain-backed secrets, groups, cloud presets, TLS modes (incl. `verify-full` with a CA file), **SSH tunnel** (password or key, pinned host keys) and **HTTP tunnel** (proxy `CONNECT`, Basic auth), session restore |
+| **Connections** | Keychain-backed secrets, groups, cloud presets, TLS modes (incl. `verify-full` with a CA file), **SSH tunnel** (password or key, pinned host keys), **HTTP tunnel** (proxy `CONNECT`, Basic auth) and **PHP tunnel** script ([`tunnel/talus-tunnel.php`](tunnel/talus-tunnel.php)) for shared hosting, session restore |
 | **SQL editor** | Highlighting, context-aware completion (tables, aliases, columns), formatter, ⌘/ comments, run selection / current statement / script, cancel, multiple result sets with charts, `EXPLAIN`, manual transactions, history |
 | **Data editor** | Paging, sort, filters, inline edit, cell inspector, NULL handling, insert / delete, transactional apply with rollback, copy as `INSERT` |
 | **Schema** | Table designer (columns, indexes, foreign keys) with a diffed SQL preview, create / drop database, routines and triggers browser, users and privileges |
-| **Modelling** | **Conceptual / logical / physical** models with lossless conversion, star schema and Data Vault templates, reverse engineering from a live schema, forward DDL for four engines, comparison with a database, ER diagram with SVG export |
-| **Debugging** | **PL/pgSQL debugger**: breakpoints, Step Over / Into / Out, Continue, call stack, variables with Set Value, watch list, input parameters |
+| **Modelling** | **Conceptual / logical / physical** models with lossless conversion, star schema and Data Vault templates, reverse engineering from a live schema, forward DDL for six engines, comparison with a database, ER diagram with SVG export, page-setup printing with preview and PDF for models and ER diagrams |
+| **Debugging** | **PL/pgSQL debugger** and **PL/SQL debugger** (`DBMS_DEBUG`): breakpoints, Step Over / Into / Out, Continue, call stack, variables with Set Value, watch list, input parameters |
 | **Transfer** | Import CSV / JSON / XML; streaming export to CSV, TSV, JSON, SQL, HTML, XML and Excel; SQL dump; execute an SQL file |
 | **Sync & tools** | Structure and data synchronization, find in database, visual query builder, column profiling, test-data generator, data dictionary (HTML / Markdown), server monitor (cancel / kill sessions) |
 | **Automation** | Scheduled jobs (backups, exports, SQL) run by `launchd`, with run history |
@@ -63,16 +63,16 @@ a quiet, monochrome interface, with no trial, no licence keys and no edition gat
 
 <br>
 
-| | SQLite | PostgreSQL | MySQL / MariaDB | SQL Server | Redis | MongoDB |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Browse, query, edit data | ✓ | ✓ | ✓ | ✓ | keys | documents |
-| Table designer, indexes, FKs | ✓ | ✓ | ✓ | ✓ | — | — |
-| Structure / data sync, dump | ✓ | ✓ | ✓ | ✓ | — | — |
-| Users and privileges | — | ✓ | ✓ | ✓ | — | — |
-| Server monitor | — | ✓ | ✓ | ✓ | — | — |
-| Routines debugger | — | ✓ | — | — | — | — |
-| SSH / HTTP tunnel | — | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Encryption at rest | SQLCipher | — | — | — | — | — |
+| | SQLite | PostgreSQL | MySQL / MariaDB | SQL Server | Oracle | Snowflake | Redis | MongoDB |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Browse, query, edit data | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | keys | documents |
+| Table designer, indexes, FKs | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| Structure / data sync, dump | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| Users and privileges | — | ✓ | ✓ | ✓ | ✓ | users | — | — |
+| Server monitor | — | ✓ | ✓ | ✓ | ✓ | cancel queries | — | — |
+| Routines debugger | — | ✓ | — | — | ✓ | — | — | — |
+| SSH / HTTP / PHP tunnel | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ |
+| Encryption at rest | SQLCipher | — | — | — | — | — | — | — |
 
 </details>
 
@@ -98,7 +98,7 @@ a quiet, monochrome interface, with no trial, no licence keys and no edition gat
 ```sh
 git clone https://github.com/fallowlone/Talus.git && cd Talus
 cargo run -p talus-app --release        # run from source
-scripts/bundle-macos.sh                  # → target/release/Talus.app (ad-hoc signed)
+scripts/bundle-macos.sh                  # → release/Talus.app, release/Talus-<version>-macos.zip (ad-hoc signed), release/talus-server
 ```
 
 Press **⌘N** to add a connection, **⌘Y** to open a query, and **⌘K** to search.
@@ -219,12 +219,13 @@ TALUS_SCREENSHOT_DIR=/tmp/shots cargo test -p talus-app --test ui_flow    # rend
 ## Roadmap
 
 Talus covers the workflow of a full-featured desktop database client; [`docs/feature-matrix.md`](docs/feature-matrix.md)
-tracks every item. These are not built yet:
+tracks every item. The roadmap is complete; the AI assistant was left out on purpose. Snowflake is implemented but
+has not run against a real account, and shared workspaces need you to host the small
+[`talus-server`](crates/talus-server/README.md).
 
-- [ ] Oracle and Snowflake engines (and with Oracle, the PL/SQL debugger)
-- [ ] PHP tunnel script for shared hosting (the proxy `CONNECT` tunnel already works)
-- [ ] Shared workspaces / cloud collaboration
-- [ ] Model printing
+Recently completed: **shared workspaces** (a self-hosted sync server with accounts and roles; definitions only, never secrets), the Oracle engine with the PL/SQL debugger, the Snowflake engine
+(live verification pending a real account), the PHP tunnel script for shared hosting,
+and printing of models / ER diagrams with preview and PDF.
 
 ## Contributing
 

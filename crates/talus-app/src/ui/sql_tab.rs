@@ -32,8 +32,9 @@ pub enum RunMode {
 pub fn explain_prefix(engine: Engine) -> &'static str {
     match engine {
         Engine::Sqlite => "EXPLAIN QUERY PLAN ",
-        Engine::Postgres | Engine::MySql => "EXPLAIN ",
+        Engine::Postgres | Engine::MySql | Engine::Snowflake => "EXPLAIN ",
         Engine::SqlServer => "SET SHOWPLAN_TEXT ON; ",
+        Engine::Oracle => "EXPLAIN PLAN FOR ",
         Engine::Redis | Engine::MongoDb => "",
     }
 }
@@ -43,6 +44,10 @@ pub fn explain_prefix(engine: Engine) -> &'static str {
 pub fn explain_script(engine: Engine, sql: &str) -> String {
     match engine {
         Engine::SqlServer => format!("{}{sql}; SET SHOWPLAN_TEXT OFF", explain_prefix(engine)),
+        // The plan is stored in PLAN_TABLE; the second statement reads it back.
+        Engine::Oracle => {
+            format!("{}{sql}; SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY())", explain_prefix(engine))
+        }
         _ => format!("{}{sql}", explain_prefix(engine)),
     }
 }

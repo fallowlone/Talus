@@ -1,12 +1,12 @@
 #!/bin/sh
-# Builds the release binary and assembles an ad-hoc signed Talus.app in target/release/.
+# Builds the release binary and assembles an ad-hoc signed Talus.app (plus a zip and the talus-server binary) in release/.
 set -eu
 cd "$(dirname "$0")/.."
-cargo build --release -p talus-app
-APP=target/release/Talus.app
+cargo build --release -p talus-app -p talus-server
+APP=release/Talus.app
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p release "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/talus "$APP/Contents/MacOS/Talus"
 cp assets/Talus.icns "$APP/Contents/Resources/Talus.icns"
 # The binary contains third-party code whose licenses require their texts to ship with it.
@@ -33,4 +33,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 codesign --force --sign - "$APP"
+cp target/release/talus-server release/talus-server
+ditto -c -k --keepParent "$APP" "release/Talus-${VERSION}-macos.zip"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"

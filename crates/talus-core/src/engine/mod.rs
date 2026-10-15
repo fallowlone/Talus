@@ -3,7 +3,9 @@
 
 mod mssql;
 mod mysql;
+mod oracle;
 mod postgres;
+mod snowflake;
 mod sqlite;
 
 pub use sqlite::{create_database_file, create_database_file_with_key};
@@ -38,6 +40,11 @@ pub(crate) trait EngineSession {
     async fn list_objects(&mut self, database: &str, schema: Option<&str>) -> DbResult<Vec<ObjectRef>>;
     async fn table_structure(&mut self, obj: &ObjectRef) -> DbResult<TableStructure>;
     async fn ddl(&mut self, obj: &ObjectRef) -> DbResult<String>;
+    /// Runs one PL/SQL block with `outs` text OUT binds (`:1`, `:2`, …) and returns their values.
+    /// Oracle only; the block is not committed.
+    async fn plsql_out(&mut self, _block: &str, _outs: usize) -> DbResult<Vec<Option<String>>> {
+        Err(DbError::Invalid("PL/SQL blocks with OUT binds are an Oracle feature".into()))
+    }
     fn cancel_handle(&self) -> CancelHandle;
     fn current_database(&self) -> String;
     async fn close(self) -> DbResult<()>;
@@ -50,6 +57,8 @@ pub enum CancelHandle {
     Postgres(Box<postgres::PgCancel>),
     MySql(mysql::MyCancel),
     SqlServer(mssql::MsCancel),
+    Oracle(oracle::OraCancel),
+    Snowflake(snowflake::SfCancel),
 }
 
 impl CancelHandle {
@@ -62,6 +71,8 @@ impl CancelHandle {
             CancelHandle::Postgres(c) => c.cancel().await,
             CancelHandle::MySql(c) => c.cancel().await,
             CancelHandle::SqlServer(c) => c.cancel().await,
+            CancelHandle::Oracle(c) => c.cancel().await,
+            CancelHandle::Snowflake(c) => c.cancel().await,
         }
     }
 }
@@ -71,6 +82,8 @@ pub enum Session {
     Postgres(Box<postgres::PgSession>),
     MySql(mysql::MySession),
     SqlServer(Box<mssql::MsSession>),
+    Oracle(Box<oracle::OraSession>),
+    Snowflake(Box<snowflake::SfSession>),
 }
 
 macro_rules! dispatch {
@@ -80,6 +93,8 @@ macro_rules! dispatch {
             Session::Postgres($s) => $body,
             Session::MySql($s) => $body,
             Session::SqlServer($s) => $body,
+            Session::Oracle($s) => $body,
+            Session::Snowflake($s) => $body,
         }
     };
 }
@@ -125,6 +140,10 @@ impl Session {
             Engine::SqlServer => {
                 Session::SqlServer(Box::new(mssql::MsSession::connect(cfg, password, database).await?))
             }
+            Engine::Oracle => Session::Oracle(Box::new(oracle::OraSession::connect(cfg, password).await?)),
+            Engine::Snowflake => {
+                Session::Snowflake(Box::new(snowflake::SfSession::connect(cfg, password, database).await?))
+            }
             Engine::Redis | Engine::MongoDb => {
                 return Err(DbError::Invalid(format!("{} is not a SQL engine", cfg.engine.label())));
             }
@@ -143,6 +162,8 @@ impl Session {
             Session::Postgres(_) => Engine::Postgres,
             Session::MySql(_) => Engine::MySql,
             Session::SqlServer(_) => Engine::SqlServer,
+            Session::Oracle(_) => Engine::Oracle,
+            Session::Snowflake(_) => Engine::Snowflake,
         }
     }
 
@@ -303,6 +324,11 @@ impl Session {
             }
         }
         Ok(hits)
+    }
+
+    /// Runs a PL/SQL block with `outs` text OUT binds and returns their values (Oracle).
+    pub async fn plsql_out(&mut self, block: &str, outs: usize) -> DbResult<Vec<Option<String>>> {
+        dispatch!(self, s => s.plsql_out(block, outs).await)
     }
 
     /// Parameterised statement; returns affected rows.

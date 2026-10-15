@@ -241,7 +241,17 @@ pub fn insertable(name: &str, kind: Kind, engine: Engine) -> String {
     }
     let plain = name.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
         && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-    let plain = plain || (engine != Engine::Postgres && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+    // Oracle and Snowflake fold unquoted names to upper case: only an all-upper-case name is
+    // written as it is (Oracle also allows `#` unquoted, Snowflake does not).
+    let upper_plain = |extra: &[char]| {
+        name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || extra.contains(&c))
+    };
+    let plain = plain
+        || (engine == Engine::Oracle && upper_plain(&['_', '$', '#']))
+        || (engine == Engine::Snowflake && upper_plain(&['_', '$']))
+        || (!matches!(engine, Engine::Postgres | Engine::Oracle | Engine::Snowflake)
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
     if plain {
         name.to_string()
     } else {

@@ -33,6 +33,8 @@ pub struct ModelTab {
     pub loading: bool,
     /// Connection and database of the last comparison; its script opens bound to them.
     pub target: Option<(Uuid, String)>,
+    /// The print window while it is open.
+    print: Option<super::print_dialog::PrintDialog>,
 }
 
 pub enum ModelAction {
@@ -73,6 +75,7 @@ impl ModelTab {
             error: None,
             loading: false,
             target: None,
+            print: None,
         }
     }
 
@@ -272,6 +275,18 @@ impl ModelTab {
                     self.save(path);
                 }
             }
+            if ui
+                .add_enabled(!self.model.tables.is_empty(), egui::Button::new(format!("{} Print…", icons::PRINTER)))
+                .on_hover_text("Page setup, preview, PDF and printing of the whole model")
+                .clicked()
+            {
+                let scene = crate::print_scene::model_scene(
+                    &self.model,
+                    self.engine,
+                    &crate::print_fonts::PrintFonts::default(),
+                );
+                self.print = Some(super::print_dialog::PrintDialog::new(scene));
+            }
             ui.separator();
             // Converting between levels is lossless: the level only decides what is shown and allowed.
             let l = ui.label("Model type");
@@ -402,6 +417,11 @@ impl ModelTab {
                 self.editor(ui, tab_id);
             });
         self.canvas(ui, tab_id);
+        if let Some(d) = &mut self.print
+            && !d.ui(ui.ctx())
+        {
+            self.print = None;
+        }
         out
     }
 

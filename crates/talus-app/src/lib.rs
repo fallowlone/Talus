@@ -7,6 +7,9 @@ pub mod headless;
 pub mod launchd;
 #[cfg(target_os = "macos")]
 pub mod native_menu;
+pub mod print_fonts;
+pub mod print_job;
+pub mod print_scene;
 pub mod state;
 pub mod theme;
 pub mod ui;

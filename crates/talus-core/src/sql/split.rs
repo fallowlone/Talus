@@ -63,6 +63,53 @@ fn alone_on_line(src: &str, t: &Token) -> bool {
     line.is_empty() || line.chars().all(|c| c.is_ascii_digit())
 }
 
+/// How an Oracle statement that holds PL/SQL ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OraUnit {
+    /// `BEGIN … END;`, `DECLARE … END;`, `CREATE PROCEDURE|FUNCTION|TRIGGER … END;`: the `;` that closes the
+    /// outermost `END` ends it (unless subprograms are declared inside, then only `/` does).
+    Block,
+    /// Packages, types, compound triggers, Java: only a `/` line (or the end of the input) ends it.
+    SlashOnly,
+}
+
+/// What kind of statement starts at `tokens[i]` (its first significant token), if it holds PL/SQL.
+fn oracle_unit(src: &str, tokens: &[Token], i: usize) -> Option<OraUnit> {
+    let words: Vec<String> =
+        tokens[i..].iter().filter(|t| !t.kind.is_trivia()).take(10).map(|t| t.text(src).to_ascii_lowercase()).collect();
+    let w = |n: usize| words.get(n).map(String::as_str);
+    match w(0)? {
+        "begin" | "declare" => Some(OraUnit::Block),
+        "create" => {
+            if words.iter().any(|x| x == "compound") {
+                return Some(OraUnit::SlashOnly);
+            }
+            let kind = words[1..].iter().find(|x| {
+                !matches!(
+                    x.as_str(),
+                    "or" | "replace" | "editionable" | "noneditionable" | "force" | "and" | "resolve" | "compile"
+                )
+            })?;
+            match kind.as_str() {
+                "procedure" | "function" | "trigger" => Some(OraUnit::Block),
+                "package" | "type" | "library" | "java" => Some(OraUnit::SlashOnly),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// `/` alone on its line: SQL*Plus' "run what is in the buffer".
+fn slash_line(src: &str, t: &Token) -> bool {
+    if t.kind != TokenKind::Punct || t.text(src) != "/" {
+        return false;
+    }
+    let before = &src[..t.start];
+    let line_start = before.rfind('\n').map_or(0, |p| p + 1);
+    before[line_start..].trim().is_empty() && src[t.end..].split('\n').next().unwrap_or("").trim().is_empty()
+}
+
 pub fn split(src: &str, engine: Engine) -> Vec<Statement<'_>> {
     let tokens = tokenize(src, engine);
     let mut b = Builder { src, out: Vec::new(), start: None, last_sig_end: 0, counted_upto: 0, lines: 0 };
@@ -71,12 +118,83 @@ pub fn split(src: &str, engine: Engine) -> Vec<Statement<'_>> {
     let mut first_word_create = false;
     let mut block_mode = false;
     let mut depth: i32 = 0;
+    // Oracle PL/SQL: the kind of unit being read, how deeply BEGIN/CASE are nested, whether the main BEGIN
+    // was seen, and whether subprograms were declared inside (then `;` can no longer end the unit).
+    let mut ora_unit: Option<OraUnit> = None;
+    let (mut ora_seen_begin, mut ora_nested_decl) = (false, false);
     let mut i = 0;
     while i < tokens.len() {
         let t = tokens[i];
         if t.kind.is_trivia() {
             i += 1;
             continue;
+        }
+        if engine == Engine::Oracle {
+            if slash_line(src, &t) {
+                // Ends the statement in progress; a stray `/` between statements is ignored.
+                let line_end = src[t.end..].find('\n').map_or(src.len(), |p| t.end + p);
+                b.finish(line_end);
+                (ora_unit, depth, ora_seen_begin, ora_nested_decl) = (None, 0, false, false);
+                while i < tokens.len() && tokens[i].start < line_end {
+                    i += 1;
+                }
+                continue;
+            }
+            if b.start.is_none() && t.kind != TokenKind::Punct {
+                ora_unit = oracle_unit(src, &tokens, i);
+            }
+            if ora_unit.is_some() && t.kind == TokenKind::Word {
+                let next_word = tokens[i + 1..].iter().find(|x| !x.kind.is_trivia());
+                match t.text(src).to_ascii_lowercase().as_str() {
+                    "begin" => {
+                        depth += 1;
+                        ora_seen_begin = true;
+                    }
+                    "case" => depth += 1,
+                    "end" => {
+                        let closes_other = next_word.is_some_and(|n| ["if", "loop"].iter().any(|k| word_eq(src, n, k)));
+                        if !closes_other {
+                            depth -= 1;
+                        }
+                    }
+                    "procedure" | "function"
+                        if depth == 0 && !ora_seen_begin && b.start.is_some_and(|s| s != t.start) =>
+                    {
+                        // A subprogram declared in the unit's declaration part (the unit's own header is
+                        // the first token or follows CREATE [OR REPLACE]).
+                        let header = tokens[..i]
+                            .iter()
+                            .filter(|x| !x.kind.is_trivia() && x.start >= b.start.unwrap_or(0))
+                            .all(|x| {
+                                ["create", "or", "replace", "editionable", "noneditionable"]
+                                    .iter()
+                                    .any(|k| word_eq(src, x, k))
+                            });
+                        if !header {
+                            ora_nested_decl = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // A PL/SQL unit swallows its own `;`s; the one after the outermost END closes it.
+            if t.kind == TokenKind::Punct && t.text(src) == ";" {
+                match ora_unit {
+                    Some(OraUnit::Block) if depth <= 0 && ora_seen_begin && !ora_nested_decl => {
+                        b.last_sig_end = t.end;
+                        b.finish(t.end);
+                        (ora_unit, depth, ora_seen_begin, ora_nested_decl) = (None, 0, false, false);
+                        i += 1;
+                        continue;
+                    }
+                    Some(_) => {
+                        b.last_sig_end = t.end;
+                        i += 1;
+                        continue;
+                    }
+                    None => {}
+                }
+            }
         }
         // MySQL client-side DELIMITER directive (only at statement start).
         if engine == Engine::MySql && b.start.is_none() && word_eq(src, &t, "delimiter") {
@@ -229,6 +347,44 @@ mod tests {
     #[test]
     fn plain_begin_transaction_still_splits() {
         assert_eq!(texts("BEGIN; UPDATE t SET a=1; COMMIT;", Engine::Postgres).len(), 3);
+    }
+
+    #[test]
+    fn oracle_plsql_blocks_slash_and_q_quotes() {
+        let e = Engine::Oracle;
+        assert_eq!(
+            texts("select 1 from dual;\nselect 2 from dual", e),
+            vec!["select 1 from dual", "select 2 from dual"]
+        );
+        // An anonymous block keeps its closing `;` and ends there, without needing a `/`.
+        assert_eq!(texts("begin null; end; select 1 from dual", e), vec!["begin null; end;", "select 1 from dual"]);
+        // IF / LOOP / CASE ends do not close the block early.
+        let body = "declare x number; begin if x is null then x := case when 1 = 1 then 1 else 2 end; end if; \
+                    for i in 1..2 loop null; end loop; end;";
+        assert_eq!(texts(&format!("{body}\nselect 1 from dual"), e), vec![body, "select 1 from dual"]);
+        // CREATE PROCEDURE / FUNCTION / TRIGGER: a `/` line after the unit is consumed.
+        assert_eq!(
+            texts("create or replace procedure p is begin null; end p;\n/\nselect 1 from dual;", e),
+            vec!["create or replace procedure p is begin null; end p;", "select 1 from dual"]
+        );
+        assert_eq!(
+            texts("create trigger t before insert on x for each row begin :new.a := 1; end;\nselect 2 from dual", e),
+            vec!["create trigger t before insert on x for each row begin :new.a := 1; end;", "select 2 from dual"]
+        );
+        // Packages hold many `;` before their END: only `/` ends them.
+        let pkg = "create package pk as procedure a; function b return number; end pk;";
+        assert_eq!(texts(&format!("{pkg}\n/\nselect 1 from dual"), e), vec![pkg, "select 1 from dual"]);
+        // A subprogram declared inside a block means the first END..; is not the end of the unit.
+        let nested = "declare procedure q is begin null; end q; begin q; end;";
+        assert_eq!(texts(&format!("{nested}\n/\nselect 1 from dual"), e), vec![nested, "select 1 from dual"]);
+        // q-quoted strings and comments hide semicolons and slashes.
+        assert_eq!(
+            texts("select q'[a;b]' from dual; -- x;\nselect 2 /* ; */ from dual", e),
+            vec!["select q'[a;b]' from dual", "select 2 /* ; */ from dual"]
+        );
+        // A `/` that is not alone on its line is a division.
+        assert_eq!(texts("select 4 / 2 from dual;", e), vec!["select 4 / 2 from dual"]);
+        assert_eq!(texts("\n/\nselect 1 from dual;", e), vec!["select 1 from dual"], "stray slash");
     }
 
     #[test]

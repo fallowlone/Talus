@@ -21,6 +21,12 @@ csv.workspace = true
 quick-xml.workspace = true
 rust_xlsxwriter.workspace = true
 tiberius.workspace = true
+oracledb.workspace = true
+snowflake-connector-rs.workspace = true
+ring.workspace = true
+flate2.workspace = true
+tokio-native-tls.workspace = true
+url.workspace = true
 redis.workspace = true
 mongodb.workspace = true
 tokio-util.workspace = true
@@ -29,9 +35,11 @@ futures-util.workspace = true
 tracing.workspace = true
 russh.workspace = true
 base64.workspace = true
+reqwest.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework.workspace = true
 
 [dev-dependencies]
+talus-server.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

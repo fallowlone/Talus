@@ -121,7 +121,8 @@ impl FindTab {
                 && self.database.is_some()
                 && !self.needle.trim().is_empty()
                 && self.running.is_none();
-            if ui.add_enabled(ready, egui::Button::new(format!("{} Find", icons::MAGNIFYING_GLASS))).clicked() {
+            let find = theme::primary_button(theme::current(ui.ctx()), format!("{} Find", icons::MAGNIFYING_GLASS));
+            if ui.add_enabled(ready, find).clicked() {
                 out.push(FindAction::Run);
             }
             if self.running.is_some() {

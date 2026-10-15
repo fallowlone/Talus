@@ -31,6 +31,8 @@ pub struct DiagramTab {
     zoom: f32,
     pan: Vec2,
     dragging: Option<String>,
+    /// The print window while it is open.
+    print: Option<super::print_dialog::PrintDialog>,
 }
 
 pub enum DiagramAction {
@@ -115,6 +117,7 @@ impl DiagramTab {
             zoom: 1.0,
             pan: vec2(20.0, 20.0),
             dragging: None,
+            print: None,
         }
     }
 
@@ -157,6 +160,25 @@ impl DiagramTab {
             {
                 out.push(DiagramAction::ExportSvg(super::diagram_svg::to_svg(m, &self.positions)));
             }
+            if ui
+                .add_enabled(
+                    self.model.loaded().is_some_and(|m| !m.is_empty()),
+                    egui::Button::new(format!("{} Print…", icons::PRINTER)),
+                )
+                .on_hover_text("Page setup, preview, PDF and printing of the whole diagram")
+                .clicked()
+                && let Some(m) = self.model.loaded()
+            {
+                let scope = self.schema.as_deref().unwrap_or(&self.database);
+                let scene = crate::print_scene::er_scene(
+                    m,
+                    &self.positions,
+                    &format!("ER diagram — {scope}"),
+                    &format!("{} tables", m.len()),
+                    &crate::print_fonts::PrintFonts::default(),
+                );
+                self.print = Some(super::print_dialog::PrintDialog::new(scene));
+            }
             ui.separator();
             if ui.button(icons::MAGNIFYING_GLASS_MINUS).on_hover_text("Zoom out").clicked() {
                 self.zoom = (self.zoom / 1.2).max(0.3);
@@ -179,6 +201,12 @@ impl DiagramTab {
             }
         });
         ui.separator();
+        // The print window floats above the canvas: it is shown whatever the canvas does below.
+        if let Some(d) = &mut self.print
+            && !d.ui(ui.ctx())
+        {
+            self.print = None;
+        }
         let model = match &self.model {
             Loadable::Loaded(m) => m.clone(),
             Loadable::Failed(e) => {
@@ -317,7 +345,7 @@ impl DiagramTab {
     }
 }
 
-pub(super) fn short_type(t: &str) -> String {
+pub fn short_type(t: &str) -> String {
     let t = t.replace("character varying", "varchar").replace("timestamp without time zone", "timestamp");
     if t.chars().count() > 16 { format!("{}…", t.chars().take(15).collect::<String>()) } else { t }
 }

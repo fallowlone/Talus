@@ -92,7 +92,7 @@ pub async fn dump_schema(
     )?;
     writeln!(out, "-- Engine: {}\n", engine.label())?;
     match engine {
-        Engine::Redis | Engine::MongoDb => {}
+        Engine::Redis | Engine::MongoDb | Engine::Oracle | Engine::Snowflake => {}
         Engine::MySql => writeln!(out, "SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n")?,
         Engine::Sqlite => writeln!(out, "PRAGMA foreign_keys=OFF;\n")?,
         Engine::Postgres => {
@@ -123,7 +123,7 @@ pub async fn dump_schema(
             let (obj, _) = &tables[i];
             writeln!(out, "-- Data: {}", obj.name)?;
             let target = match engine {
-                Engine::Postgres | Engine::SqlServer => d.qualified(obj)?,
+                Engine::Postgres | Engine::SqlServer | Engine::Oracle | Engine::Snowflake => d.qualified(obj)?,
                 _ => d.quote_ident(&obj.name)?,
             };
             // Identity columns only accept explicit values while IDENTITY_INSERT is on.
@@ -147,7 +147,7 @@ pub async fn dump_schema(
         Engine::Redis | Engine::MongoDb => {}
         Engine::MySql => writeln!(out, "SET FOREIGN_KEY_CHECKS=1;")?,
         Engine::Sqlite => writeln!(out, "PRAGMA foreign_keys=ON;")?,
-        Engine::Postgres | Engine::SqlServer => {}
+        Engine::Postgres | Engine::SqlServer | Engine::Oracle | Engine::Snowflake => {}
     }
     out.flush()?;
     Ok(DumpReport { tables: tables.len(), views: views.len(), rows })

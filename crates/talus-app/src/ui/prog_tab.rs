@@ -3,7 +3,7 @@
 use egui::RichText;
 use egui_phosphor::regular as icons;
 use talus_core::model::Engine;
-use talus_core::programmability::{ProgItem, ProgKind};
+use talus_core::programmability::{ProgItem, ProgKind, template, view_template};
 use uuid::Uuid;
 
 use crate::state::Loadable;
@@ -23,6 +23,8 @@ pub enum ProgAction {
     /// Open this definition in a new query tab.
     OpenInQuery(String),
     Copy(String),
+    /// Drop this object (the app confirms with the exact statement first).
+    Drop(ProgItem),
     /// Open the PL/pgSQL debugger on routine `oid` (`name` for the tab title).
     Debug {
         oid: u32,
@@ -35,6 +37,7 @@ fn kind_icon(k: ProgKind) -> &'static str {
         ProgKind::Function => icons::FUNCTION,
         ProgKind::Procedure => icons::GEAR_SIX,
         ProgKind::Trigger => icons::LIGHTNING,
+        ProgKind::Package => icons::PACKAGE,
     }
 }
 
@@ -67,6 +70,26 @@ impl ProgTab {
             }
             if self.items.is_loading() {
                 ui.spinner();
+            }
+            // Creation skeletons open in the query editor, like an edit does.
+            let kinds: &[ProgKind] = match self.engine {
+                Engine::Sqlite => &[ProgKind::Trigger],
+                Engine::Snowflake => &[ProgKind::Function, ProgKind::Procedure],
+                Engine::Redis | Engine::MongoDb => &[],
+                _ => &[ProgKind::Function, ProgKind::Procedure, ProgKind::Trigger],
+            };
+            for k in kinds {
+                if ui.button(format!("New {}", k.label())).clicked() {
+                    out.push(ProgAction::OpenInQuery(template(
+                        self.engine,
+                        *k,
+                        &self.database,
+                        self.schema.as_deref(),
+                    )));
+                }
+            }
+            if self.engine.is_sql() && ui.button("New View").clicked() {
+                out.push(ProgAction::OpenInQuery(view_template(self.engine, &self.database, self.schema.as_deref())));
             }
         });
         ui.separator();
@@ -104,10 +127,16 @@ impl ProgTab {
             if ui.button(format!("{} Open in Query", icons::FILE_SQL)).clicked() {
                 out.push(ProgAction::OpenInQuery(it.definition.clone()));
             }
-            if let Some(oid) = it.pg_oid
-                && ui.button(format!("{} Debug", icons::BUG)).on_hover_text("PL/pgSQL debugger").clicked()
+            if let Some(oid) = it.debug_id
+                && ui
+                    .button(format!("{} Debug", icons::BUG))
+                    .on_hover_text(if self.engine == Engine::Oracle { "PL/SQL debugger" } else { "PL/pgSQL debugger" })
+                    .clicked()
             {
                 out.push(ProgAction::Debug { oid, name: it.name.clone() });
+            }
+            if ui.button("Delete").clicked() {
+                out.push(ProgAction::Drop(it.clone()));
             }
         });
         egui::ScrollArea::both().id_salt(("prog-def", tab_id)).auto_shrink([false, false]).show(ui, |ui| {

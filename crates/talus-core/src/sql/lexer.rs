@@ -96,9 +96,15 @@ fn next_token(b: &[u8], pos: usize, engine: Engine) -> (TokenKind, usize) {
         b'@' if engine == Engine::SqlServer && next.is_some_and(|x| is_word_start(x) || x == b'@') => {
             (TokenKind::Param, scan_while(b, pos + 1, |x| is_word_char(x) || x == b'@'))
         }
-        b'$' if engine == Engine::Postgres => scan_dollar(b, pos),
+        b'$' if engine == Engine::Postgres => scan_dollar(b, pos, true),
+        // Snowflake procedure bodies quote with `$$`; `$1` is a staged-file column, not a bind.
+        b'$' if engine == Engine::Snowflake => scan_dollar(b, pos, false),
         b'?' => (TokenKind::Param, scan_while(b, pos + 1, |x| x.is_ascii_digit())),
         b':' if engine == Engine::Sqlite && next.is_some_and(is_word_start) => {
+            (TokenKind::Param, scan_while(b, pos + 1, is_word_char))
+        }
+        // Oracle binds: `:name` and `:1`.
+        b':' if engine == Engine::Oracle && next.is_some_and(is_word_char) => {
             (TokenKind::Param, scan_while(b, pos + 1, is_word_char))
         }
         b'0'..=b'9' => (TokenKind::Number, scan_number(b, pos)),
@@ -108,6 +114,15 @@ fn next_token(b: &[u8], pos: usize, engine: Engine) -> (TokenKind, usize) {
             // PostgreSQL escape string E'...' (backslash escapes).
             if engine == Engine::Postgres && end == pos + 1 && (c == b'E' || c == b'e') && b.get(end) == Some(&b'\'') {
                 return (TokenKind::String, scan_quoted(b, end, b'\'', true));
+            }
+            // Oracle alternative quoting: q'[it's]', nq'{...}'.
+            if engine == Engine::Oracle
+                && end - pos <= 2
+                && b[pos..end].eq_ignore_ascii_case(if end - pos == 1 { b"q" } else { b"nq" })
+                && b.get(end) == Some(&b'\'')
+                && b.get(end + 1).is_some_and(|d| !d.is_ascii_whitespace())
+            {
+                return (TokenKind::String, scan_q_quoted(b, end));
             }
             (TokenKind::Word, end)
         }
@@ -185,9 +200,29 @@ fn scan_quoted(b: &[u8], pos: usize, quote: u8, backslash: bool) -> usize {
     b.len()
 }
 
-fn scan_dollar(b: &[u8], pos: usize) -> (TokenKind, usize) {
+/// Oracle `q'<d>…<d'>'` literal; `quote` is the position of the opening `'`. The closing delimiter
+/// mirrors brackets (`[` `]`, `{` `}`, `(` `)`, `<` `>`) and is the same character otherwise.
+fn scan_q_quoted(b: &[u8], quote: usize) -> usize {
+    let close = match b[quote + 1] {
+        b'[' => b']',
+        b'{' => b'}',
+        b'(' => b')',
+        b'<' => b'>',
+        other => other,
+    };
+    let mut i = quote + 2;
+    while i + 1 < b.len() {
+        if b[i] == close && b[i + 1] == b'\'' {
+            return i + 2;
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+fn scan_dollar(b: &[u8], pos: usize, positional_param: bool) -> (TokenKind, usize) {
     // `$1` positional parameter.
-    if b.get(pos + 1).is_some_and(|x| x.is_ascii_digit()) {
+    if positional_param && b.get(pos + 1).is_some_and(|x| x.is_ascii_digit()) {
         return (TokenKind::Param, scan_while(b, pos + 1, |x| x.is_ascii_digit()));
     }
     // `$tag$ ... $tag$` where tag is empty or an identifier.
@@ -270,6 +305,19 @@ mod tests {
         assert_eq!(k[6], (TokenKind::LineComment, "# hash"));
         // `--x` without a space is not a comment in MySQL.
         assert_eq!(k[7], (TokenKind::Punct, "-"));
+    }
+
+    #[test]
+    fn oracle_q_quotes_and_binds() {
+        let k = kinds("select q'[it's; ]' , nq'{a}', Q'!x!', :name, :1 from dual", Engine::Oracle);
+        assert_eq!(k[1], (TokenKind::String, "q'[it's; ]'"));
+        assert_eq!(k[3], (TokenKind::String, "nq'{a}'"));
+        assert_eq!(k[5], (TokenKind::String, "Q'!x!'"));
+        assert_eq!(k[7], (TokenKind::Param, ":name"));
+        assert_eq!(k[9], (TokenKind::Param, ":1"));
+        // a plain identifier that happens to be `q` is not a literal
+        let k = kinds("select q from t", Engine::Oracle);
+        assert_eq!(k[1], (TokenKind::Word, "q"));
     }
 
     #[test]

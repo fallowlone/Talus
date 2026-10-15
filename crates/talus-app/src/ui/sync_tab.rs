@@ -172,7 +172,11 @@ impl SyncTab {
             })
             .collect();
         self.plan = Some(if se != te {
-            Err(format!("Source is {} but target is {}; structure sync needs the same engine.", se.label(), te.label()))
+            // Different engines: structure diffing does not translate, but missing
+            // tables can be created with mapped types and then filled by data sync.
+            let db = self.target.database.clone().unwrap_or_default();
+            let schema = te.default_schema().map(|d| self.target.schema.clone().unwrap_or_else(|| d.into()));
+            Ok(talus_core::transfer::plan(s, t, te, &db, schema.as_deref()))
         } else {
             let db = self.target.database.clone().unwrap_or_default();
             let schema = te.default_schema().map(|d| self.target.schema.clone().unwrap_or_else(|| d.into()));
@@ -180,13 +184,24 @@ impl SyncTab {
                 structure_sync(te, s, t, &db, schema.as_deref(), self.include_drops).map_err(|e| e.to_string());
             match (tables, self.source.views.loaded(), self.target.views.loaded()) {
                 (Ok(mut plan), Some(sv), Some(tv)) => {
-                    // Definitions name their schema: only meaningful when both sides use the same names.
-                    let same = if te.default_schema().is_some() {
-                        self.source.schema == self.target.schema
+                    // Definitions embed their namespace; view_sync rewrites the
+                    // source's qualifier to the target's when they differ.
+                    let namespaces = if te.default_schema().is_some() {
+                        match (
+                            self.source.schema.clone().or_else(|| se.default_schema().map(String::from)),
+                            schema.clone(),
+                        ) {
+                            (Some(a), Some(b)) => Some((a, b)),
+                            _ => None,
+                        }
                     } else {
-                        self.source.database == self.target.database
+                        match (self.source.database.clone(), self.target.database.clone()) {
+                            (Some(a), Some(b)) => Some((a, b)),
+                            _ => None,
+                        }
                     };
-                    match talus_core::sql::sync::view_sync(te, sv, tv, self.include_drops, same) {
+                    let namespaces = namespaces.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+                    match talus_core::sql::sync::view_sync(te, sv, tv, self.include_drops, namespaces) {
                         Ok(v) => {
                             plan.statements.extend(v.statements);
                             plan.destructive.extend(v.destructive);

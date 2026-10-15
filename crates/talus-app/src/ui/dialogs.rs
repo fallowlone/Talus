@@ -42,6 +42,11 @@ pub enum Confirmed {
         tab: u64,
         sql: String,
     },
+    /// Drop a routine / trigger from the Routines tab, then reload its list.
+    DropProgrammable {
+        tab: u64,
+        sql: String,
+    },
     /// Run every statement of a SQL file on this database.
     RunSqlFile {
         conn: Uuid,
@@ -148,8 +153,11 @@ impl PasswordPrompt {
                     ui.label(format!("Enter the database password for “{}”.", self.conn_name));
                 }
                 SecretKind::TunnelSecret => {
-                    ui.heading("SSH Password Required");
-                    ui.label(format!("Enter the SSH password for “{}”.", self.conn_name));
+                    ui.heading("Tunnel Password Required");
+                    ui.label(format!(
+                        "Enter the SSH password or key passphrase, the proxy password or the PHP tunnel key for “{}”.",
+                        self.conn_name
+                    ));
                 }
             }
             let l = ui.label("Password");

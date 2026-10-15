@@ -11,6 +11,8 @@ pub enum Engine {
     Postgres,
     MySql,
     SqlServer,
+    Oracle,
+    Snowflake,
     Redis,
     MongoDb,
 }
@@ -24,8 +26,16 @@ pub enum EngineKind {
 }
 
 impl Engine {
-    pub const ALL: [Engine; 6] =
-        [Engine::Sqlite, Engine::Postgres, Engine::MySql, Engine::SqlServer, Engine::Redis, Engine::MongoDb];
+    pub const ALL: [Engine; 8] = [
+        Engine::Sqlite,
+        Engine::Postgres,
+        Engine::MySql,
+        Engine::SqlServer,
+        Engine::Oracle,
+        Engine::Snowflake,
+        Engine::Redis,
+        Engine::MongoDb,
+    ];
 
     pub fn kind(self) -> EngineKind {
         match self {
@@ -45,6 +55,8 @@ impl Engine {
             Engine::Postgres => "PostgreSQL",
             Engine::MySql => "MySQL / MariaDB",
             Engine::SqlServer => "SQL Server",
+            Engine::Oracle => "Oracle",
+            Engine::Snowflake => "Snowflake",
             Engine::Redis => "Redis",
             Engine::MongoDb => "MongoDB",
         }
@@ -56,6 +68,9 @@ impl Engine {
             Engine::Postgres => 5432,
             Engine::MySql => 3306,
             Engine::SqlServer => 1433,
+            Engine::Oracle => 1521,
+            // Snowflake speaks HTTPS; the port is unused but kept valid for the shared validation.
+            Engine::Snowflake => 443,
             Engine::Redis => 6379,
             Engine::MongoDb => 27017,
         }
@@ -66,7 +81,9 @@ impl Engine {
         match self {
             Engine::Postgres => Some("public"),
             Engine::SqlServer => Some("dbo"),
-            Engine::Sqlite | Engine::MySql | Engine::Redis | Engine::MongoDb => None,
+            Engine::Sqlite | Engine::MySql | Engine::Oracle | Engine::Snowflake | Engine::Redis | Engine::MongoDb => {
+                None
+            }
         }
     }
 
@@ -77,7 +94,7 @@ impl Engine {
             Engine::SqlServer => Some("master"),
             Engine::Redis => Some("0"),
             Engine::MongoDb => Some("admin"),
-            Engine::Sqlite | Engine::MySql => None,
+            Engine::Sqlite | Engine::MySql | Engine::Oracle | Engine::Snowflake => None,
         }
     }
 
@@ -86,7 +103,10 @@ impl Engine {
         match self {
             Engine::MySql => "START TRANSACTION",
             Engine::SqlServer => "BEGIN TRANSACTION",
-            Engine::Sqlite | Engine::Postgres | Engine::Redis | Engine::MongoDb => "BEGIN",
+            // Oracle has no BEGIN statement (a bare BEGIN opens a PL/SQL block): transactions start with
+            // the first DML. This statement is what the session recognises as "stop auto-committing".
+            Engine::Oracle => "SET TRANSACTION READ WRITE",
+            Engine::Sqlite | Engine::Postgres | Engine::Snowflake | Engine::Redis | Engine::MongoDb => "BEGIN",
         }
     }
 
@@ -118,6 +138,24 @@ impl Engine {
                 session_per_database: true,
                 server_cancel: true,
                 transactional_ddl: true,
+                network: true,
+            },
+            // One session per service; the tree's schema level lists the accounts (owners) of its objects.
+            // DDL commits implicitly and cannot be rolled back.
+            Engine::Oracle => Capabilities {
+                schemas: true,
+                session_per_database: false,
+                server_cancel: true,
+                transactional_ddl: false,
+                network: true,
+            },
+            // Cloud data warehouse over HTTPS. Databases hold schemas; one session works on one
+            // database (`USE DATABASE`), like PostgreSQL. DDL commits an open transaction implicitly.
+            Engine::Snowflake => Capabilities {
+                schemas: true,
+                session_per_database: true,
+                server_cancel: true,
+                transactional_ddl: false,
                 network: true,
             },
             // Redis selects a database per connection (SELECT n).
@@ -332,6 +370,54 @@ pub struct ConnectionConfig {
     /// Exclusive with `ssh`.
     #[serde(default)]
     pub http_proxy: Option<HttpProxyConfig>,
+    /// Optional PHP tunnel script on a web host (`tunnel/talus-tunnel.php`); `host`/`port` are then
+    /// resolved by that host. Exclusive with `ssh` and `http_proxy`.
+    #[serde(default)]
+    pub php_tunnel: Option<PhpTunnelConfig>,
+    /// Snowflake-only session settings (warehouse, role, schema, auth). `host` holds the account
+    /// locator; the port is unused (HTTPS).
+    #[serde(default)]
+    pub snowflake: Option<SnowflakeConfig>,
+}
+
+/// How a Snowflake session authenticates.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SnowflakeAuth {
+    /// Password from the secrets store (or a prompt).
+    #[default]
+    Password,
+    /// Key-pair authentication with an unencrypted PEM private key file.
+    KeyPair { key_file: String },
+    /// OAuth access token, stored as the connection's password secret.
+    OAuth,
+}
+
+/// Snowflake-only session settings. Empty strings fall back to the user's server-side defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SnowflakeConfig {
+    /// Compute warehouse (`COMPUTE_WH`); every query runs and bills on it.
+    #[serde(default)]
+    pub warehouse: String,
+    /// Role to assume (`ACCOUNTADMIN`, `SYSADMIN`, …).
+    #[serde(default)]
+    pub role: String,
+    /// Default schema (`PUBLIC`).
+    #[serde(default)]
+    pub schema: String,
+    /// Custom account URL for PrivateLink (`https://xyz.privatelink.snowflakecomputing.com`);
+    /// empty means `https://<account>.snowflakecomputing.com`.
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub auth: SnowflakeAuth,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PhpTunnelConfig {
+    /// `https://example.com/talus-tunnel.php`. The tunnel key is the connection's tunnel secret.
+    pub url: String,
+    #[serde(default)]
+    pub save_secret: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,20 +491,39 @@ impl ConnectionConfig {
             encrypted: false,
             ssh: None,
             http_proxy: None,
+            php_tunnel: None,
+            snowflake: None,
+        }
+    }
+
+    /// Effective Snowflake settings (defaults when the connection stores none).
+    pub fn snowflake_config(&self) -> SnowflakeConfig {
+        self.snowflake.clone().unwrap_or_default()
+    }
+
+    /// The schema unqualified names resolve to: the engine's fixed one (`public`, `dbo`) or, for Oracle, the
+    /// logged-in account (its schema; accounts are stored upper case unless created with quotes).
+    pub fn default_schema(&self) -> Option<String> {
+        match self.engine {
+            Engine::Oracle => Some(self.user.trim().to_uppercase()).filter(|u| !u.is_empty()),
+            Engine::Snowflake => Some(self.snowflake_config().schema.trim().to_string()).filter(|s| !s.is_empty()),
+            e => e.default_schema().map(String::from),
         }
     }
 
     pub fn has_tunnel(&self) -> bool {
-        self.ssh.is_some() || self.http_proxy.is_some()
+        self.ssh.is_some() || self.http_proxy.is_some() || self.php_tunnel.is_some()
     }
 
     /// For the tunnel's secret (SSH password / key passphrase, proxy password): whether it is saved
     /// in the Keychain and whether it must be asked for when it is not. `None` without a tunnel.
     pub fn tunnel_secret_policy(&self) -> Option<(bool, bool)> {
-        match (&self.ssh, &self.http_proxy) {
-            (Some(s), _) => Some((s.save_secret, matches!(s.auth, SshAuth::Password))),
-            (None, Some(p)) => Some((p.save_secret, !p.user.is_empty())),
-            (None, None) => None,
+        match (&self.ssh, &self.http_proxy, &self.php_tunnel) {
+            (Some(s), _, _) => Some((s.save_secret, matches!(s.auth, SshAuth::Password))),
+            (None, Some(p), _) => Some((p.save_secret, !p.user.is_empty())),
+            // The tunnel key is always required.
+            (None, None, Some(t)) => Some((t.save_secret, true)),
+            (None, None, None) => None,
         }
     }
 
@@ -427,10 +532,16 @@ impl ConnectionConfig {
             s.save_secret = saved;
         } else if let Some(p) = self.http_proxy.as_mut() {
             p.save_secret = saved;
+        } else if let Some(t) = self.php_tunnel.as_mut() {
+            t.save_secret = saved;
         }
     }
 
     pub fn needs_password(&self) -> bool {
+        // Key-pair authentication reads the private key from a file instead of the secrets store.
+        if self.engine == Engine::Snowflake && matches!(self.snowflake_config().auth, SnowflakeAuth::KeyPair { .. }) {
+            return false;
+        }
         self.engine.capabilities().network || (self.engine == Engine::Sqlite && self.encrypted)
     }
 
@@ -442,12 +553,35 @@ impl ConnectionConfig {
             Engine::Sqlite if self.database.trim().is_empty() => Err("Database file is required".into()),
             e if e.capabilities().network && self.host.trim().is_empty() => Err("Host is required".into()),
             e if e.capabilities().network && self.port == 0 => Err("Port must be between 1 and 65535".into()),
+            Engine::Oracle if self.database.trim().is_empty() => Err("Service name is required".into()),
             // Redis and MongoDB can run without authentication.
-            Engine::Postgres | Engine::MySql | Engine::SqlServer if self.user.trim().is_empty() => {
+            Engine::Postgres | Engine::MySql | Engine::SqlServer | Engine::Oracle | Engine::Snowflake
+                if self.user.trim().is_empty() =>
+            {
                 Err("User name is required".into())
             }
-            _ if self.ssh.is_some() && self.http_proxy.is_some() => {
-                Err("Use either an SSH tunnel or an HTTP tunnel, not both".into())
+            Engine::Snowflake
+                if matches!(
+                    self.snowflake_config().auth,
+                    SnowflakeAuth::KeyPair { ref key_file } if key_file.trim().is_empty()
+                ) =>
+            {
+                Err("Snowflake private key file is required".into())
+            }
+            // Snowflake is a cloud HTTPS endpoint: there is no host:port to forward.
+            Engine::Snowflake if self.has_tunnel() => {
+                Err("Snowflake connects directly over HTTPS and cannot use tunnels".into())
+            }
+            _ if [self.ssh.is_some(), self.http_proxy.is_some(), self.php_tunnel.is_some()]
+                .iter()
+                .filter(|x| **x)
+                .count()
+                > 1 =>
+            {
+                Err("Use one tunnel: SSH, HTTP proxy or PHP script, not several".into())
+            }
+            _ if self.php_tunnel.as_ref().is_some_and(|t| crate::php_tunnel::Endpoint::parse(&t.url).is_err()) => {
+                Err(crate::php_tunnel::Endpoint::parse(self.php_tunnel.as_ref().map_or("", |t| &t.url)).unwrap_err())
             }
             _ if self.http_proxy.as_ref().is_some_and(|p| p.host.trim().is_empty()) => {
                 Err("HTTP proxy host is required".into())
@@ -709,7 +843,7 @@ mod tests {
         assert!(c.validate().is_ok());
         assert_eq!(c.tunnel_secret_policy(), Some((false, false)), "no proxy user: nothing to ask");
         c.ssh = Some(SshConfig { host: "bastion".into(), user: "u".into(), ..SshConfig::default() });
-        assert!(c.validate().unwrap_err().contains("not both"));
+        assert!(c.validate().unwrap_err().contains("Use one tunnel"));
         c.http_proxy = None;
         c.set_tunnel_secret_saved(true);
         assert_eq!(c.tunnel_secret_policy(), Some((true, true)));

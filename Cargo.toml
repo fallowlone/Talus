@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/talus-core", "crates/talus-app"]
+members = ["crates/talus-core", "crates/talus-app", "crates/talus-server"]
 
 [workspace.package]
 version = "0.2.0"
@@ -10,6 +10,7 @@ rust-version = "1.90"
 
 [workspace.dependencies]
 talus-core = { path = "crates/talus-core" }
+talus-server = { path = "crates/talus-server" }
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
 tokio-postgres = "0.7.18"
 postgres-native-tls = "0.5.3"
@@ -40,6 +41,16 @@ mongodb = { version = "3.9.1", default-features = false, features = ["rustls-tls
 tiberius = { version = "0.13.0", default-features = false, features = ["tds73", "rustls", "chrono"] }
 tokio-util = { version = "0.7.20", features = ["compat"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+oracledb = "=26.0.0-beta.4"
+snowflake-connector-rs = { version = "1.1", default-features = false, features = ["key-pair-auth"] }
+ring = "0.17"
+ab_glyph = "0.2"
+epaint_default_fonts = "0.36"
+flate2 = "1"
+tokio-native-tls = "0.3"
+url = "2"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rust_xlsxwriter = { version = "0.99.1", default-features = false, features = ["constant_memory"] }
 
 [profile.release]

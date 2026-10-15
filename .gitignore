@@ -4,3 +4,4 @@
 
 # Local Claude Code skills / plugins (not part of Talus)
 .claude/
+/release

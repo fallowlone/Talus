@@ -3,6 +3,7 @@
 //! opt-in. Views are not synchronized.
 
 use super::Dialect;
+use super::lexer::{TokenKind, tokenize};
 use std::collections::HashMap;
 
 use super::constraints::{self, FkDef, IndexDef};
@@ -24,7 +25,7 @@ pub struct SyncPlan {
 /// foreign key that points inside the source schema points inside the target schema after sync.
 fn normalize_fks(engine: Engine, db: &str, schema: Option<&str>, list: &[ForeignKeyInfo]) -> Vec<ForeignKeyInfo> {
     let prefix = match engine {
-        Engine::Postgres | Engine::SqlServer => schema,
+        Engine::Postgres | Engine::SqlServer | Engine::Oracle | Engine::Snowflake => schema,
         Engine::MySql => Some(db).filter(|d| !d.is_empty()),
         Engine::Sqlite | Engine::Redis | Engine::MongoDb => None,
     };
@@ -148,9 +149,15 @@ pub fn structure_sync(
 
 pub type ViewList<'a> = &'a [(ObjectRef, String)];
 
-/// Whitespace- and case-insensitive form of a view definition, for comparison only.
+/// Whitespace-, case- and quoting-insensitive form of a view definition, for comparison only.
 fn normalize_view(ddl: &str) -> String {
-    ddl.trim().trim_end_matches(';').split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    ddl.trim()
+        .trim_end_matches(';')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .replace(['"', '`', '[', ']'], "")
 }
 
 /// `CREATE VIEW …` as text that creates or replaces the view, without server-specific DEFINER noise.
@@ -174,47 +181,91 @@ fn replace_view_sql(engine: Engine, ddl: &str) -> String {
         return t;
     }
     match engine {
-        Engine::MySql | Engine::Postgres => t.replacen("CREATE ", "CREATE OR REPLACE ", 1),
+        Engine::MySql | Engine::Postgres | Engine::Oracle => t.replacen("CREATE ", "CREATE OR REPLACE ", 1),
         Engine::SqlServer => t.replacen("CREATE ", "CREATE OR ALTER ", 1),
         _ => t,
     }
 }
 
-/// Makes the target's views match the source's. Definitions embed their own schema names, so a
-/// comparison across differently named schemas would copy the wrong ones: it is refused with a note.
+/// The identifier inside a quoted token (`"a""b"`, `` `a` ``, `[a]`), unescaped.
+fn unquoted(text: &str) -> String {
+    let b = text.as_bytes();
+    if text.len() >= 2 {
+        match (b[0], b[text.len() - 1]) {
+            (b'"', b'"') => return text[1..text.len() - 1].replace("\"\"", "\""),
+            (b'`', b'`') => return text[1..text.len() - 1].replace("``", "`"),
+            (b'[', b']') => return text[1..text.len() - 1].to_string(),
+            _ => {}
+        }
+    }
+    text.to_string()
+}
+
+/// Rewrites every `from.` qualifier in a definition to the target namespace, token
+/// by token, so string literals, comments and identifiers that merely contain the
+/// name are left alone.
+fn rewrite_namespace(ddl: &str, engine: Engine, from: &str, to: &str) -> String {
+    let quoted = Dialect(engine).quote_ident(to).unwrap_or_else(|_| to.to_string());
+    let toks = tokenize(ddl, engine);
+    let mut out = String::with_capacity(ddl.len());
+    let mut last = 0;
+    for (i, t) in toks.iter().enumerate() {
+        if !matches!(t.kind, TokenKind::Word | TokenKind::QuotedIdent) {
+            continue;
+        }
+        if !unquoted(t.text(ddl)).eq_ignore_ascii_case(from) {
+            continue;
+        }
+        let qualifier = toks[i + 1..]
+            .iter()
+            .find(|x| !matches!(x.kind, TokenKind::Whitespace | TokenKind::LineComment | TokenKind::BlockComment))
+            .is_some_and(|x| x.kind == TokenKind::Punct && x.text(ddl) == ".");
+        if !qualifier {
+            continue;
+        }
+        out.push_str(&ddl[last..t.start]);
+        out.push_str(&quoted);
+        last = t.end;
+    }
+    out.push_str(&ddl[last..]);
+    out
+}
+
+/// Makes the target's views match the source's. Definitions embed their own
+/// namespace (schema, or database where that is the qualifier), so when the two
+/// sides name it differently every `source.` qualifier is rewritten to the
+/// target's before comparing or copying. `namespaces` is `(source, target)`;
+/// `None` runs the definitions as they are.
 pub fn view_sync(
     engine: Engine,
     source: ViewList<'_>,
     target: ViewList<'_>,
     include_drops: bool,
-    same_namespace: bool,
+    namespaces: Option<(&str, &str)>,
 ) -> DbResult<SyncPlan> {
     let d = Dialect(engine);
     let mut plan = SyncPlan::default();
-    if !same_namespace {
-        if !source.is_empty() {
-            plan.summary
-                .push("! skip views: their definitions name the source schema, which differs from the target's".into());
-        }
-        return Ok(plan);
-    }
     for (sobj, sddl) in source {
         // The definition is the source server's text and runs on the target: exactly one statement.
         if super::split::split(sddl, engine).len() != 1 {
             plan.summary.push(format!("! skip view {}: its definition is not a single statement", sobj.name));
             continue;
         }
+        let ddl = match namespaces {
+            Some((from, to)) if !from.eq_ignore_ascii_case(to) => rewrite_namespace(sddl, engine, from, to),
+            _ => sddl.clone(),
+        };
         match target.iter().find(|(t, _)| t.name == sobj.name) {
             None => {
-                plan.statements.push(replace_view_sql(engine, sddl));
+                plan.statements.push(replace_view_sql(engine, &ddl));
                 plan.summary.push(format!("+ create view {}", sobj.name));
             }
-            Some((_, tddl)) if normalize_view(tddl) != normalize_view(sddl) => {
+            Some((tobj, tddl)) if normalize_view(tddl) != normalize_view(&ddl) => {
                 if engine == Engine::Sqlite {
                     // SQLite has no CREATE OR REPLACE VIEW.
-                    plan.statements.push(format!("DROP VIEW {}", d.qualified(sobj)?));
+                    plan.statements.push(format!("DROP VIEW {}", d.qualified(tobj)?));
                 }
-                plan.statements.push(replace_view_sql(engine, sddl));
+                plan.statements.push(replace_view_sql(engine, &ddl));
                 plan.summary.push(format!("~ replace view {}", sobj.name));
             }
             Some(_) => {}
@@ -301,7 +352,7 @@ mod tests {
             (v("ok"), "CREATE VIEW public.ok AS SELECT 1".to_string()),
             (v("evil"), "CREATE VIEW public.evil AS SELECT 1; DROP TABLE public.users".to_string()),
         ];
-        let plan = view_sync(Engine::Postgres, &source, &[], false, true).unwrap();
+        let plan = view_sync(Engine::Postgres, &source, &[], false, None).unwrap();
         assert_eq!(plan.statements.len(), 1, "{:?}", plan.statements);
         assert!(!plan.statements[0].contains("DROP"));
         assert!(plan.summary.iter().any(|l| l.starts_with("! skip view evil")));
@@ -360,18 +411,50 @@ mod tests {
     fn views_are_created_replaced_and_dropped_on_request() {
         let src = vec![view("a", "CREATE VIEW a AS SELECT 1"), view("b", "CREATE VIEW b AS select  2 ;")];
         let tgt = vec![view("b", "create view b as select 2"), view("old", "CREATE VIEW old AS SELECT 0")];
-        let p = view_sync(Engine::Postgres, &src, &tgt, false, true).unwrap();
+        let p = view_sync(Engine::Postgres, &src, &tgt, false, None).unwrap();
         assert_eq!(p.statements, vec!["CREATE OR REPLACE VIEW a AS SELECT 1"], "b only differs in spelling");
         assert!(p.summary.iter().any(|s| s.contains("keep extra view old")));
         let changed = vec![view("b", "CREATE VIEW b AS SELECT 3")];
-        let p = view_sync(Engine::Sqlite, &changed, &tgt, true, true).unwrap();
+        let p = view_sync(Engine::Sqlite, &changed, &tgt, true, None).unwrap();
         assert_eq!(p.statements[0], "DROP VIEW \"main\".\"b\"");
         assert_eq!(p.statements[1], "CREATE VIEW b AS SELECT 3");
         assert!(p.statements.contains(&"DROP VIEW \"main\".\"old\"".to_string()) && p.destructive.len() == 1);
-        let p = view_sync(Engine::SqlServer, &src[..1], &[], false, true).unwrap();
+        let p = view_sync(Engine::SqlServer, &src[..1], &[], false, None).unwrap();
         assert_eq!(p.statements, vec!["CREATE OR ALTER VIEW a AS SELECT 1"]);
-        let p = view_sync(Engine::Postgres, &src, &tgt, true, false).unwrap();
-        assert!(p.statements.is_empty() && p.summary[0].starts_with("! skip views"));
+    }
+
+    #[test]
+    fn views_follow_the_target_namespace() {
+        // The qualifier is rewritten in the header and the body; strings and
+        // identifiers that merely contain the name are left alone.
+        let src = vec![view(
+            "v",
+            "CREATE VIEW s1.v AS SELECT * FROM s1.t JOIN plain ON plain.id = s1.t.id WHERE note = 's1.t' AND s1x = 1",
+        )];
+        let p = view_sync(Engine::Postgres, &src, &[], false, Some(("s1", "s2"))).unwrap();
+        assert_eq!(
+            p.statements,
+            vec![
+                "CREATE OR REPLACE VIEW \"s2\".v AS SELECT * FROM \"s2\".t JOIN plain ON plain.id = \"s2\".t.id WHERE note = 's1.t' AND s1x = 1"
+            ],
+            "{:?}",
+            p.summary
+        );
+        // A target that already holds the rewritten definition is in sync.
+        let tgt = vec![view(
+            "v",
+            "create view s2.v as select * from s2.t join plain on plain.id = s2.t.id where note = 's1.t' and s1x = 1",
+        )];
+        let p = view_sync(Engine::Postgres, &src, &tgt, false, Some(("s1", "s2"))).unwrap();
+        assert!(p.statements.is_empty(), "{:?}", p.statements);
+        // Quoted identifiers rewrite too, including the view's own name.
+        let src = vec![view("v", "CREATE VIEW \"S1\".\"v\" AS SELECT \"S1\".\"t\".\"x\" FROM \"S1\".\"t\"")];
+        let p = view_sync(Engine::Postgres, &src, &[], false, Some(("s1", "s2"))).unwrap();
+        assert!(
+            p.statements[0].contains("\"s2\".\"v\"") && p.statements[0].contains("\"s2\".\"t\""),
+            "{:?}",
+            p.statements
+        );
     }
 
     #[test]

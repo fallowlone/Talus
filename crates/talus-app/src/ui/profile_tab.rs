@@ -67,7 +67,7 @@ impl ProfileTab {
             _ => return out,
         };
         egui::ScrollArea::both().id_salt(("profile", tab_id)).auto_shrink([false, false]).show(ui, |ui| {
-            egui::Grid::new(("profile-grid", tab_id)).striped(true).spacing([14.0, 6.0]).show(ui, |ui| {
+            egui::Grid::new(("profile-grid", tab_id)).striped(false).spacing([14.0, 6.0]).show(ui, |ui| {
                 for h in ["Column", "Type", "Rows", "NULL %", "Distinct", "Min", "Max", "Average", "Most frequent"] {
                     ui.label(RichText::new(h).strong());
                 }

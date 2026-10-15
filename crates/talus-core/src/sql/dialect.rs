@@ -19,15 +19,18 @@ impl Dialect {
         Ok(match self.0 {
             Engine::MySql => format!("`{}`", ident.replace('`', "``")),
             Engine::SqlServer => format!("[{}]", ident.replace(']', "]]")),
-            Engine::Sqlite | Engine::Postgres | Engine::Redis | Engine::MongoDb => {
-                format!("\"{}\"", ident.replace('"', "\"\""))
-            }
+            Engine::Sqlite
+            | Engine::Postgres
+            | Engine::Oracle
+            | Engine::Snowflake
+            | Engine::Redis
+            | Engine::MongoDb => format!("\"{}\"", ident.replace('"', "\"\"")),
         })
     }
 
     pub fn qualified(self, obj: &ObjectRef) -> DbResult<String> {
         let qualifier = match self.0 {
-            Engine::Postgres | Engine::SqlServer => obj.schema.as_deref(),
+            Engine::Postgres | Engine::SqlServer | Engine::Oracle | Engine::Snowflake => obj.schema.as_deref(),
             Engine::MySql | Engine::Sqlite | Engine::Redis | Engine::MongoDb => {
                 Some(obj.database.as_str()).filter(|d| !d.is_empty())
             }
@@ -45,9 +48,11 @@ impl Dialect {
         match (self.0, type_name) {
             (Engine::Postgres, Some(t)) => format!("${n}::text::{t}"),
             (Engine::Postgres, None) => format!("${n}"),
-            (Engine::MySql, _) => "?".into(),
+            // Snowflake converts bound text to the column type implicitly.
+            (Engine::MySql | Engine::Snowflake, _) => "?".into(),
             (Engine::Sqlite | Engine::Redis | Engine::MongoDb, _) => format!("?{n}"),
             (Engine::SqlServer, _) => format!("@P{n}"),
+            (Engine::Oracle, _) => format!(":{n}"),
         }
     }
 
@@ -86,6 +91,9 @@ mod tests {
         assert_eq!(Dialect(Engine::MySql).qualified(&o).unwrap(), "`db`.`t`");
         assert_eq!(Dialect(Engine::Sqlite).qualified(&o).unwrap(), "\"db\".\"t\"");
         assert_eq!(Dialect(Engine::SqlServer).qualified(&o).unwrap(), "[s].[t]");
+        assert_eq!(Dialect(Engine::Oracle).qualified(&o).unwrap(), "\"s\".\"t\"");
+        assert_eq!(Dialect(Engine::Snowflake).qualified(&o).unwrap(), "\"s\".\"t\"");
+        assert_eq!(Dialect(Engine::Snowflake).placeholder(3, Some("NUMBER")), "?");
     }
 
     #[test]

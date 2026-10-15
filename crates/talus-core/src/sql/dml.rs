@@ -60,7 +60,22 @@ fn text_expr(d: Dialect, col: &str) -> String {
     match d.0 {
         Engine::Postgres => format!("CAST({col} AS text)"),
         Engine::SqlServer => format!("CAST({col} AS nvarchar(max))"),
+        // LIKE on a NUMBER or DATE errors without a cast.
+        Engine::Snowflake => format!("CAST({col} AS VARCHAR)"),
         _ => col.to_string(),
+    }
+}
+
+/// `col LIKE pattern` in the engine's spelling: PostgreSQL has ILIKE, Oracle's and Snowflake's LIKE
+/// are case-sensitive (both sides are upper-cased), the other engines compare case-insensitively already.
+fn like_sql(d: Dialect, negate: bool, text_col: &str, placeholder: &str) -> String {
+    let not = if negate { "NOT " } else { "" };
+    match d.0 {
+        Engine::Postgres => format!("{text_col} {not}ILIKE {placeholder} ESCAPE '!'"),
+        Engine::Oracle | Engine::Snowflake => {
+            format!("UPPER({text_col}) {not}LIKE UPPER({placeholder}) ESCAPE '!'")
+        }
+        _ => format!("{text_col} {not}LIKE {placeholder} ESCAPE '!'"),
     }
 }
 
@@ -99,19 +114,12 @@ pub fn select_page(d: Dialect, q: &PageQuery, s: &TableStructure) -> DbResult<Bu
     for f in q.filters.iter().filter(|f| f.enabled) {
         let col = col_expr(d, checked_column(s, &f.column)?)?;
         let text_col = text_expr(d, &col);
-        let like = if d.0 == Engine::Postgres { "ILIKE" } else { "LIKE" };
         conds.push(match f.op {
             FilterOp::IsNull => format!("{col} IS NULL"),
             FilterOp::IsNotNull => format!("{col} IS NOT NULL"),
-            FilterOp::Contains => {
-                format!("{text_col} {like} {} ESCAPE '!'", p.push_text(like_pattern(&f.value, false)))
-            }
-            FilterOp::NotContains => {
-                format!("{text_col} NOT {like} {} ESCAPE '!'", p.push_text(like_pattern(&f.value, false)))
-            }
-            FilterOp::BeginsWith => {
-                format!("{text_col} {like} {} ESCAPE '!'", p.push_text(like_pattern(&f.value, true)))
-            }
+            FilterOp::Contains => like_sql(d, false, &text_col, &p.push_text(like_pattern(&f.value, false))),
+            FilterOp::NotContains => like_sql(d, true, &text_col, &p.push_text(like_pattern(&f.value, false))),
+            FilterOp::BeginsWith => like_sql(d, false, &text_col, &p.push_text(like_pattern(&f.value, true))),
             op => {
                 let sym = op.label();
                 format!("{col} {sym} {}", p.push(&f.column, Some(f.value.clone())))
@@ -138,9 +146,9 @@ pub fn select_page(d: Dialect, q: &PageQuery, s: &TableStructure) -> DbResult<Bu
         sql.push_str(" ORDER BY ");
         sql.push_str(&order.join(", "));
     }
-    if d.0 == Engine::SqlServer {
-        // OFFSET … FETCH is only valid after an ORDER BY.
-        if order.is_empty() {
+    if matches!(d.0, Engine::SqlServer | Engine::Oracle) {
+        // OFFSET … FETCH is only valid after an ORDER BY on SQL Server (Oracle 12c+ does not need one).
+        if order.is_empty() && d.0 == Engine::SqlServer {
             sql.push_str(" ORDER BY (SELECT NULL)");
         }
         sql.push_str(&format!(" OFFSET {} ROWS FETCH NEXT {} ROWS ONLY", q.offset, q.limit));
@@ -197,6 +205,11 @@ pub fn insert_row(d: Dialect, table: &str, s: &TableStructure, values: &[(String
     if values.is_empty() {
         let sql = match d.0 {
             Engine::MySql => format!("INSERT INTO {table} () VALUES ()"),
+            // No DEFAULT VALUES clause: give the first column its default explicitly.
+            Engine::Oracle | Engine::Snowflake => {
+                let first = s.columns.first().ok_or_else(|| DbError::Invalid("the table has no columns".into()))?;
+                format!("INSERT INTO {table} ({}) VALUES (DEFAULT)", d.quote_ident(&first.name)?)
+            }
             _ => format!("INSERT INTO {table} DEFAULT VALUES"),
         };
         return Ok(BuiltQuery { sql, params: vec![] });
@@ -219,7 +232,6 @@ pub fn insert_row(d: Dialect, table: &str, s: &TableStructure, values: &[(String
 /// `SELECT COUNT(*)` of rows where any non-binary column contains `needle` (case-insensitive).
 pub fn count_matches(d: Dialect, table: &str, s: &TableStructure, needle: &str) -> DbResult<Option<BuiltQuery>> {
     let mut p = Params { d, s, values: Vec::new() };
-    let like = if d.0 == Engine::Postgres { "ILIKE" } else { "LIKE" };
     let conds = s
         .columns
         .iter()
@@ -229,6 +241,9 @@ pub fn count_matches(d: Dialect, table: &str, s: &TableStructure, needle: &str) 
             let binary_like = matches!(
                 base,
                 "blob"
+                    | "raw"
+                    | "long raw"
+                    | "bfile"
                     | "bytea"
                     | "binary"
                     | "varbinary"
@@ -248,7 +263,7 @@ pub fn count_matches(d: Dialect, table: &str, s: &TableStructure, needle: &str) 
         .map(|c| {
             let col = d.quote_ident(&c.name)?;
             let text_col = text_expr(d, &col);
-            Ok(format!("{text_col} {like} {} ESCAPE '!'", p.push_text(like_pattern(needle, false))))
+            Ok(like_sql(d, false, &text_col, &p.push_text(like_pattern(needle, false))))
         })
         .collect::<DbResult<Vec<_>>>()?;
     if conds.is_empty() {
@@ -283,6 +298,12 @@ pub fn insert_rows(d: Dialect, table: &str, s: &TableStructure, columns: &[Strin
             format!("({})", ph.join(", "))
         })
         .collect();
+    if d.0 == Engine::Oracle {
+        // Multi-row VALUES only exists from 23ai; INSERT ALL works on every supported release.
+        let cols = quoted.join(", ");
+        let into: String = groups.iter().map(|g| format!(" INTO {table} ({cols}) VALUES {g}")).collect();
+        return Ok(format!("INSERT ALL{into} SELECT 1 FROM DUAL"));
+    }
     Ok(format!("INSERT INTO {table} ({}) VALUES {}", quoted.join(", "), groups.join(", ")))
 }
 

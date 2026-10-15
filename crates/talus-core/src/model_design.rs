@@ -86,6 +86,33 @@ impl LType {
     pub fn sql(&self, engine: Engine) -> String {
         use Engine::*;
         match (self, engine) {
+            // Oracle has no integer, boolean or time-of-day types: NUMBER precisions stand in for them
+            // (`from_sql` reads them back the same way) and a DATE carries its time.
+            (LType::SmallInt, Oracle) => "NUMBER(5)".into(),
+            (LType::Integer, Oracle) => "NUMBER(10)".into(),
+            (LType::BigInt, Oracle) => "NUMBER(19)".into(),
+            (LType::Decimal { precision, scale }, Oracle) => format!("NUMBER({precision},{scale})"),
+            (LType::Float, Oracle) => "BINARY_DOUBLE".into(),
+            (LType::Boolean, Oracle) => "NUMBER(1)".into(),
+            (LType::Text | LType::Json, Oracle) => "CLOB".into(),
+            (LType::Varchar(n), Oracle) => format!("VARCHAR2({n})"),
+            (LType::Char(n), Oracle) => format!("CHAR({n})"),
+            (LType::Date | LType::Time, Oracle) => "DATE".into(),
+            (LType::DateTime, Oracle) => "TIMESTAMP".into(),
+            (LType::Uuid, Oracle) => "RAW(16)".into(),
+            (LType::Blob, Oracle) => "BLOB".into(),
+            // Snowflake precisions mirror Oracle's so `from_sql` reads them back the same way.
+            (LType::SmallInt, Snowflake) => "NUMBER(5)".into(),
+            (LType::Integer, Snowflake) => "NUMBER(10)".into(),
+            (LType::BigInt, Snowflake) => "NUMBER(19)".into(),
+            (LType::Decimal { precision, scale }, Snowflake) => format!("NUMBER({precision},{scale})"),
+            (LType::Float, Snowflake) => "FLOAT".into(),
+            (LType::Boolean, Snowflake) => "BOOLEAN".into(),
+            (LType::Text, Snowflake) => "TEXT".into(),
+            (LType::DateTime, Snowflake) => "TIMESTAMP_NTZ".into(),
+            (LType::Uuid, Snowflake) => "VARCHAR(36)".into(),
+            (LType::Json, Snowflake) => "VARIANT".into(),
+            (LType::Blob, Snowflake) => "BINARY".into(),
             (LType::SmallInt, _) if engine == Sqlite => "INTEGER".into(),
             (LType::Integer | LType::BigInt, Sqlite) => "INTEGER".into(),
             (LType::SmallInt, _) => "smallint".into(),
@@ -137,7 +164,8 @@ impl LType {
 
     /// Best-effort translation of an engine's type text back into a logical type.
     pub fn from_sql(raw: &str) -> LType {
-        let lower = raw.trim().to_ascii_lowercase();
+        // `varchar2(50 char)` / `varchar2(50 byte)`: the length semantics are not part of the logical type.
+        let lower = raw.trim().to_ascii_lowercase().replace(" char)", ")").replace(" byte)", ")");
         let base = lower.split('(').next().unwrap_or("").trim().to_string();
         let args: Vec<u32> = lower
             .split_once('(')
@@ -145,6 +173,20 @@ impl LType {
             .map(|a| a.split(',').filter_map(|x| x.trim().parse().ok()).collect())
             .unwrap_or_default();
         let one = || args.first().copied();
+        // Oracle NUMBER: a scale of 0 (or `*,0`) is a whole number, sized by its precision.
+        if base == "number" {
+            let whole = lower.contains("(*,0)") || (args.len() == 1) || (args.len() == 2 && args[1] == 0);
+            if whole {
+                return match if lower.contains("(*,0)") { Some(10) } else { one() } {
+                    Some(1) => LType::Boolean,
+                    Some(p) if p <= 5 => LType::SmallInt,
+                    Some(p) if p <= 10 => LType::Integer,
+                    Some(p) if p <= 19 => LType::BigInt,
+                    Some(p) => LType::Decimal { precision: p.min(38) as u8, scale: 0 },
+                    None => LType::Native(raw.trim().to_string()),
+                };
+            }
+        }
         match base.as_str() {
             "smallint" | "int2" | "tinyint" if !(base == "tinyint" && one() == Some(1)) => LType::SmallInt,
             "tinyint" => LType::Boolean,
@@ -154,7 +196,10 @@ impl LType {
                 LType::Decimal { precision: args[0].min(38) as u8, scale: args[1].min(38) as u8 }
             }
             "decimal" | "numeric" => LType::Decimal { precision: 18, scale: 2 },
-            "float" | "double" | "double precision" | "real" | "float4" | "float8" => LType::Float,
+            "float" | "double" | "double precision" | "real" | "float4" | "float8" | "binary_double"
+            | "binary_float" => LType::Float,
+            "raw" if one() == Some(16) => LType::Uuid,
+            "raw" | "long raw" => LType::Blob,
             "bool" | "boolean" | "bit" => LType::Boolean,
             "text" | "mediumtext" | "longtext" | "tinytext" | "clob" | "ntext" => LType::Text,
             "varchar" | "nvarchar" | "character varying" | "varchar2" | "nvarchar2" => {
@@ -168,10 +213,13 @@ impl LType {
             | "timestamp"
             | "timestamptz"
             | "smalldatetime"
+            | "timestamp_ntz"
+            | "timestamp_ltz"
+            | "timestamp_tz"
             | "timestamp without time zone"
             | "timestamp with time zone" => LType::DateTime,
             "uuid" | "uniqueidentifier" => LType::Uuid,
-            "json" | "jsonb" => LType::Json,
+            "json" | "jsonb" | "variant" | "object" | "array" => LType::Json,
             "blob" | "bytea" | "longblob" | "mediumblob" | "tinyblob" | "varbinary" | "binary" | "image" => LType::Blob,
             _ => LType::Native(raw.trim().to_string()),
         }
@@ -208,7 +256,8 @@ impl MColumn {
     fn info(&self, engine: Engine) -> ColumnInfo {
         let extra = match (self.auto_increment, engine) {
             (true, Engine::MySql) => Some("auto_increment".to_string()),
-            (true, Engine::Postgres | Engine::SqlServer) => Some("IDENTITY".to_string()),
+            (true, Engine::Postgres | Engine::SqlServer | Engine::Oracle) => Some("IDENTITY".to_string()),
+            (true, Engine::Snowflake) => Some("AUTOINCREMENT".to_string()),
             _ => None,
         };
         ColumnInfo {
@@ -697,7 +746,9 @@ impl DesignModel {
                     name: f.name.clone(),
                     columns: f.columns.clone(),
                     ref_table: match (&schema, engine) {
-                        (Some(s), Engine::Postgres | Engine::SqlServer) => format!("{s}.{}", f.ref_table),
+                        (Some(s), Engine::Postgres | Engine::SqlServer | Engine::Oracle | Engine::Snowflake) => {
+                            format!("{s}.{}", f.ref_table)
+                        }
                         (_, Engine::MySql) if !database.is_empty() => format!("{database}.{}", f.ref_table),
                         _ => f.ref_table.clone(),
                     },

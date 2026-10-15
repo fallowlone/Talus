@@ -104,7 +104,12 @@ impl ConsoleTab {
                     // The newline the key press inserted is not part of the command.
                     self.input = self.input.trim_end_matches('\n').to_string();
                 }
-                if (ui.add_enabled(!self.busy, egui::Button::new(format!("{} Run", icons::PLAY))).clicked()
+                if (ui
+                    .add_enabled(
+                        !self.busy,
+                        theme::primary_button(theme::current(ui.ctx()), format!("{} Run", icons::PLAY)),
+                    )
+                    .clicked()
                     || (r.has_focus() && submit))
                     && let Some(c) = self.run()
                 {

@@ -139,9 +139,14 @@ pub fn current(ctx: &egui::Context) -> &'static Palette {
 pub fn engine_color(engine: Engine) -> Color32 {
     // Monochrome UI: engines are told apart by their icon, not by colour.
     match engine {
-        Engine::Sqlite | Engine::Postgres | Engine::MySql | Engine::SqlServer | Engine::Redis | Engine::MongoDb => {
-            grey(0x9a)
-        }
+        Engine::Sqlite
+        | Engine::Postgres
+        | Engine::MySql
+        | Engine::SqlServer
+        | Engine::Oracle
+        | Engine::Snowflake
+        | Engine::Redis
+        | Engine::MongoDb => grey(0x9a),
     }
 }
 
@@ -151,6 +156,8 @@ pub fn engine_icon(engine: Engine) -> &'static str {
         Engine::Postgres => egui_phosphor::regular::HARD_DRIVES,
         Engine::MySql => egui_phosphor::regular::DATABASE,
         Engine::SqlServer => egui_phosphor::regular::STACK,
+        Engine::Oracle => egui_phosphor::regular::CYLINDER,
+        Engine::Snowflake => egui_phosphor::regular::SNOWFLAKE,
         Engine::Redis => egui_phosphor::regular::KEY,
         Engine::MongoDb => egui_phosphor::regular::LEAF,
     }

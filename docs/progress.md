@@ -1,10 +1,14 @@
 # Progress
 
-_Last updated: 2026-10-10 (session 2: UI redesign, model comparison)._
+_Last updated: 2026-10-13 (M11 breadth: Oracle, PL/SQL debugger, PHP tunnel, printing, Snowflake)._
 
 ## Overall status
 
-M0–M10 done. Remaining work is breadth (deferred engines and P2/P3 features) and depth items listed below.
+M0–M10 done, plus the M11 breadth items: the Oracle engine with the PL/SQL debugger, the PHP
+tunnel script, model / ER printing, and the Snowflake engine (implemented; live verification
+pending a real account). The only roadmap item not built is shared workspaces / cloud
+collaboration, which needs a hosted backend this repository does not have (see
+`remaining-work-assessment.md`).
 The app launches, connects to real SQLite / PostgreSQL / MySQL (directly or through an SSH
 tunnel), browses metadata, runs SQL with completion/format/explain/cancel, edits data
 transactionally, designs tables, imports CSV, exports tables, and searches databases.
@@ -68,7 +72,17 @@ transactionally, designs tables, imports CSV, exports tables, and searches datab
   unless the connection opts into trust-on-first-use; changed keys are always refused.
 - No trial, licensing or edition gating anywhere.
 
-## Verification executed
+## Verification executed (2026-10-13 session)
+
+| Gate | Command | Result |
+|---|---|---|
+| Format | `cargo fmt --all --check` | clean |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| Workspace tests (SQLite + headless UI) | `cargo test --workspace` | 253 passed, 3 ignored (incl. the new Snowflake dialog, cross-engine transfer and view-namespace tests) |
+| Live engine suites | `eval "$(TALUS_ORACLE=1 scripts/test-env.sh)"; cargo test -p talus-core --test engines --test debugger --test oracle_debugger --test php_tunnel --test ssh --test http_tunnel --test nosql` | all passed (engines 13 incl. live PostgreSQL / MySQL / Oracle, both debuggers, PHP tunnel, SSH, NoSQL) |
+| Live UI suites | same env; `cargo test -p talus-app --test ui_more --test ui_flow` | 40 passed (incl. the live Oracle, Redis and MongoDB flows) |
+
+## Verification executed (earlier sessions)
 
 | Gate | Command | Result |
 |---|---|---|
@@ -80,7 +94,7 @@ transactionally, designs tables, imports CSV, exports tables, and searches datab
 | App unit | `cargo test -p talus-app --lib` | 15 passed |
 | UI (headless, real SQLite / PostgreSQL / SSH) | `cargo test -p talus-app --test ui_flow --test ui_more` | 16 passed |
 | Performance (release) | `cargo test --release -p talus-core --test perf -- --ignored --nocapture` | 2 passed (numbers below) |
-| Bundle | `scripts/bundle-macos.sh` | `target/release/Talus.app`, 17 MB, ad-hoc signature verifies |
+| Bundle | `scripts/bundle-macos.sh` | `release/Talus.app` (+ zip), 17 MB, ad-hoc signature verifies |
 | Startup | `TALUS_STARTUP_PROBE=1 target/release/talus` | first frame 540 ms cold, ~118 ms warm; RSS ≈ 83 MB; idle CPU 0 % |
 
 Performance (1M-row SQLite table, Apple Silicon, release): editor `SELECT *` capped at 10k rows
@@ -142,8 +156,13 @@ rows 1.9 s (57.5 MB); splitting a 5 MB script 17 ms (was 28 s before the fix); f
   with the live schema selected in the navigator (Compare with Selection, no drops). Star schema and Data Vault roles
   with templates (Templates menu) and role rules in Check. Common types map to a portable logical type; anything else is kept as a native
   type string and emitted verbatim, so forward engineering to another engine may need manual edits.
-- Not implemented (deferred, see feature matrix): Oracle and Snowflake engines, the Oracle PL/SQL debugger, a PHP-script HTTP tunnel (the proxy CONNECT tunnel exists),
-  cloud collaboration and the AI assistant (left out by the user's decision).
+- Snowflake is implemented (engine, connection dialog, DDL/sync/users/profile support, unit tests and a
+  connection-dialog UI test) but has never run against a real account: the live suite `snowflake_suite`
+  needs `TALUS_TEST_SNOWFLAKE=account:user:password:database[:warehouse[:role]]` with rights to create
+  schemas, tables and users. Snowflake grants privileges to roles, so the privilege editor refuses with
+  an explanation instead of emitting user grants.
+- Shared workspaces: self-hosted `talus-server` (crate in this workspace) + Tools → Shared Workspace…. It stores definitions only; the server and clients both strip secrets and local paths. No hosted service is provided: a team runs the server behind its own TLS proxy. Pull overwrites the shared fields of a linked connection (local-only settings are kept); there is no merge of simultaneous local and remote edits beyond the 409 on push.
+- Not implemented: the AI assistant (left out by the user's decision).
 
 ## Incidents
 
@@ -153,6 +172,6 @@ rows 1.9 s (57.5 MB); splitting a 5 MB script 17 ms (was 28 s before the fix); f
 
 ## Next concrete actions
 
-1. Views sync; cross-engine type mapping for data transfer (ADV-04).
-2. Visual grant editor and routine/trigger/view designers (ADV-08/09).
-3. Oracle and Snowflake engines need drivers/accounts that are not available here.
+1. Snowflake stays "implemented, not live-verified" (decision 2026-10-15). It is not a development task: it needs a real account. Whenever one exists, run `TALUS_TEST_SNOWFLAKE=… cargo test -p talus-core --test engines snowflake_suite` and fix what the server rejects.
+2. Done: grant editor (ADV-08) and routine / trigger / view creation + editing (ADV-09, `New View` skeleton added).
+3. Done: shared workspaces on a self-hosted server (see `crates/talus-server/README.md`).

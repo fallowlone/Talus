@@ -273,7 +273,9 @@ fn conn_node(
                 actions.push(Action::NewTable { conn: id, db: dbname.clone(), schema: None });
                 ui.close();
             }
-            if cfg.engine.capabilities().network && ui.button(RichText::new("Drop Database…").color(p.danger)).clicked()
+            if cfg.engine.capabilities().network
+                && cfg.engine != talus_core::model::Engine::Oracle
+                && ui.button(RichText::new("Drop Database…").color(p.danger)).clicked()
             {
                 actions.push(Action::AskDropDatabase { conn: id, db: dbname.clone() });
                 ui.close();

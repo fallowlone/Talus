@@ -15,13 +15,18 @@ pub mod jobs;
 pub mod model;
 pub mod model_design;
 pub mod nosql;
+pub mod ora_debugger;
+pub mod php_tunnel;
+pub mod print;
 pub mod profile;
 pub mod programmability;
 pub mod secret;
 pub mod sql;
 pub mod ssh;
 pub mod store;
+pub mod transfer;
 pub mod tunnel;
+pub mod workspace;
 
 pub use error::{DbError, DbResult};
 pub use secret::Secret;

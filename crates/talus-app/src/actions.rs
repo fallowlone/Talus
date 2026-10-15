@@ -85,6 +85,7 @@ pub enum Action {
         html: bool,
     },
     OpenJobs,
+    OpenWorkspace,
     OpenBuilder,
     OpenModel,
     OpenUsers(Uuid),

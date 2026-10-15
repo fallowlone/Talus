@@ -97,6 +97,12 @@ impl DebugTab {
                 }
                 for r in &out.results {
                     match &r.outcome {
+                        // What an Oracle routine printed (its OUT parameters and result), one line per row.
+                        Outcome::Rows(q) if q.columns.len() == 1 && q.columns[0].name == "DBMS_OUTPUT" => {
+                            for row in q.rows.iter().take(20) {
+                                self.log.push((false, format!("Result: {}", row[0].as_deref().unwrap_or(""))));
+                            }
+                        }
                         Outcome::Rows(q) => {
                             let cols: Vec<&str> = q.columns.iter().map(|c| c.name.as_str()).collect();
                             for row in q.rows.iter().take(20) {

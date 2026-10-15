@@ -485,6 +485,8 @@ impl DataTab {
                 Some(hex) if meta.binary && hex.starts_with("0x") => match self.engine {
                     Engine::Postgres => format!("'\\x{}'::bytea", &hex[2..]),
                     Engine::SqlServer => hex.to_string(),
+                    Engine::Oracle => format!("HEXTORAW('{}')", &hex[2..]),
+                    Engine::Snowflake => format!("TO_BINARY('{}', 'HEX')", &hex[2..]),
                     _ => format!("X'{}'", &hex[2..]),
                 },
                 Some(v) => d.string_literal(v),

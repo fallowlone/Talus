@@ -56,6 +56,7 @@ crates/talus-core/        no GUI deps; everything testable without a window
   src/sql/ddl.rs           designer CREATE/ALTER plans with destructive-step reporting
   src/sql/format.rs        token-based beautifier, comment toggle
   tests/                   integration tests (SQLite always; PG/MySQL when TALUS_TEST_PG / TALUS_TEST_MYSQL set)
+crates/talus-server/      self-hosted sync server for shared workspaces (binary `talus-server`; no GUI, no DB drivers)
 crates/talus-app/         binary `talus`
   src/main.rs              eframe bootstrap, tokio runtime
   src/app.rs               App state root, layout (top bar, nav pane, tab area, info pane, status bar)

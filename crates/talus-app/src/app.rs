@@ -239,6 +239,9 @@ enum Pending {
     UserAdmin {
         tab: u64,
     },
+    ProgrammableDrop {
+        tab: u64,
+    },
     RunFile {
         conn: Uuid,
     },
@@ -357,6 +360,7 @@ pub struct App {
     notice: Option<Notice>,
     history: History,
     fill: Option<FillDialog>,
+    workspace: crate::ui::workspace_dialog::WorkspaceDialog,
     jobs: Vec<talus_core::jobs::Job>,
     jobs_running: std::collections::HashSet<Uuid>,
     jobs_checked: Instant,
@@ -373,7 +377,15 @@ impl App {
     pub fn new(ctx: &egui::Context, env: AppEnv) -> Self {
         theme::install_fonts(ctx);
         let repaint_ctx = ctx.clone();
-        let worker = Worker::new(env.rt, env.paths.known_hosts_file(), Arc::new(move || repaint_ctx.request_repaint()));
+        let worker =
+            Worker::new(env.rt.clone(), env.paths.known_hosts_file(), Arc::new(move || repaint_ctx.request_repaint()));
+        let repaint_ws = ctx.clone();
+        let workspace = crate::ui::workspace_dialog::WorkspaceDialog::new(
+            env.rt,
+            Arc::new(move || repaint_ws.request_repaint()),
+            env.secrets.clone(),
+            env.paths.workspace_file(),
+        );
         let mut notice = None;
         let settings = load_json::<Settings>(&env.paths.settings_file())
             .unwrap_or_else(|e| {
@@ -434,6 +446,7 @@ impl App {
             notice,
             history,
             fill: None,
+            workspace,
             jobs: load_json::<talus_core::jobs::JobsFile>(&jobs_path).map(|f| f.jobs).unwrap_or_default(),
             jobs_running: Default::default(),
             jobs_checked: Instant::now(),
@@ -621,6 +634,7 @@ impl App {
                 "dump-structure" => self.actions.push(Action::DumpSql { include_data: false }),
                 "run-file" => self.actions.push(Action::RunSqlFile),
                 "jobs" => self.actions.push(Action::OpenJobs),
+                "workspace" => self.actions.push(Action::OpenWorkspace),
                 "dict-html" => self.actions.push(Action::Dictionary { html: true }),
                 "dict-md" => self.actions.push(Action::Dictionary { html: false }),
                 "find" => self.actions.push(Action::OpenFind),
@@ -655,7 +669,7 @@ impl App {
             }
             (Pending::Connect(c), r) => self.on_connected(c, r),
             (Pending::Schemas { conn, db }, r) => {
-                let default_schema = self.cfg(conn).and_then(|c| c.engine.default_schema());
+                let default_schema = self.cfg(conn).and_then(ConnectionConfig::default_schema);
                 let st = self.states.entry(conn).or_default();
                 if let Some(d) = st.db_mut(&db) {
                     d.schemas = match r {
@@ -674,7 +688,7 @@ impl App {
                         && !s.expanded
                     {
                         s.expanded = true;
-                        self.actions.push(Action::LoadObjects { conn, db: db.clone(), schema: Some(def.into()) });
+                        self.actions.push(Action::LoadObjects { conn, db: db.clone(), schema: Some(def) });
                     }
                 }
             }
@@ -1031,6 +1045,13 @@ impl App {
                     self.load_users(tab);
                 }
             }
+            (Pending::ProgrammableDrop { tab }, r) => match r {
+                Ok(_) => {
+                    self.notify("Dropped.", false);
+                    self.load_routines(tab);
+                }
+                Err(e) => self.notify(format!("Failed: {e}"), true),
+            },
             (Pending::Profile { tab }, r) => {
                 if let Some(Tab { kind: TabKind::Profile(p), .. }) = self.tab_mut(tab) {
                     p.columns = match r {
@@ -1483,7 +1504,10 @@ impl App {
             Action::Select(sel) => {
                 if let NavSel::Obj(conn, obj) = &sel {
                     let key = (*conn, obj.clone());
-                    if matches!(self.ddl.get(&key), None | Some(Loadable::NotLoaded))
+                    // Redis and MongoDB have no DDL to show.
+                    let has_ddl = self.cfg(*conn).is_some_and(|c| c.engine.is_sql());
+                    if has_ddl
+                        && matches!(self.ddl.get(&key), None | Some(Loadable::NotLoaded))
                         && let Some(info) = self.conn_info(*conn, Action::Select(sel.clone()))
                     {
                         let job = self.submit(
@@ -1762,6 +1786,7 @@ impl App {
                 );
                 self.notify("Writing the data dictionary…", false);
             }
+            Action::OpenWorkspace => self.workspace.show(),
             Action::OpenJobs => {
                 if let Some(i) = self.tabs.iter().position(|t| matches!(t.kind, TabKind::Jobs(_))) {
                     self.active = i;
@@ -2119,6 +2144,9 @@ impl App {
         if self.about_open {
             dialogs::about_ui(ctx, &mut self.about_open);
         }
+        if self.workspace.ui(ctx, &mut self.connections) {
+            self.save_connections();
+        }
         if let Some((conn, name)) = self.new_database.as_mut() {
             let (conn, mut go, mut open) = (*conn, false, true);
             egui::Window::new("New Database").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
@@ -2267,6 +2295,20 @@ impl App {
                     let _ = job;
                     u.error = None;
                 }
+            }
+            Confirmed::DropProgrammable { tab, sql } => {
+                let Some(Tab { kind: TabKind::Routines(r), .. }) = self.tabs.iter().find(|t| t.id == tab) else {
+                    return;
+                };
+                let (conn, database) = (r.conn, r.database.clone());
+                let Some(info) = self.conn_info(conn, Action::ActivateTab(tab)) else { return };
+                self.submit(
+                    &info,
+                    Purpose::Tab(tab),
+                    Some(database),
+                    Request::ExecuteBatch { statements: vec![sql], transactional: false },
+                    Pending::ProgrammableDrop { tab },
+                );
             }
             Confirmed::RunSqlFile { conn, database, path } => {
                 let Some(cfg) = self.cfg(conn).cloned() else { return };
@@ -2546,13 +2588,13 @@ impl App {
         let Some(cfg) = conn.and_then(|c| connections.iter().find(|x| x.id == c)) else { return meta };
         let Some(st) = states.get(&cfg.id) else { return meta };
         let db = Self::target_db(cfg, database);
-        let schema = cfg.engine.default_schema();
+        let schema = cfg.default_schema();
         if let Some(d) = st.databases.iter().find(|d| d.name == db)
             && let Some(list) = d.schemas.loaded()
         {
             meta.schemas = list.iter().map(|s| s.name.clone()).collect();
         }
-        if let Some(objs) = st.objects(&db, schema).and_then(|o| o.loaded()) {
+        if let Some(objs) = st.objects(&db, schema.as_deref()).and_then(|o| o.loaded()) {
             for n in objs {
                 meta.objects.push((n.obj.name.clone(), n.obj.kind));
                 if let Some(s) = n.structure.loaded() {
@@ -2583,11 +2625,11 @@ impl App {
         let Some(conn) = s.conn else { return };
         let Some(cfg) = self.cfg(conn).cloned() else { return };
         let db = Self::target_db(&cfg, s.database.as_deref());
-        let schema = cfg.engine.default_schema();
+        let schema = cfg.default_schema();
         let objs: Vec<ObjectRef> = self
             .states
             .get(&conn)
-            .and_then(|st| st.objects(&db, schema))
+            .and_then(|st| st.objects(&db, schema.as_deref()))
             .and_then(|o| o.loaded())
             .map(|list| {
                 list.iter()
@@ -3526,7 +3568,7 @@ impl App {
                 }
             }
             TabKind::Routines(r) => {
-                let (conn, database) = (r.conn, r.database.clone());
+                let (conn, database, engine, schema) = (r.conn, r.database.clone(), r.engine, r.schema.clone());
                 for a in r.ui(ui, tab_id) {
                     match a {
                         ProgAction::Reload => self.load_routines(tab_id),
@@ -3536,6 +3578,24 @@ impl App {
                             database: Some(database.clone()),
                             text,
                         }),
+                        ProgAction::Drop(item) => {
+                            match talus_core::programmability::drop_sql(engine, &database, schema.as_deref(), &item) {
+                                Ok(sql) => {
+                                    self.confirm = Some(Confirm {
+                                        title: format!("Drop {}", item.kind.label()),
+                                        message: format!(
+                                            "Permanently drop {} “{}”? Anything depending on it may break.",
+                                            item.kind.label().to_lowercase(),
+                                            item.name
+                                        ),
+                                        sql: Some(sql.clone()),
+                                        confirm_label: "Drop".into(),
+                                        on_confirm: Confirmed::DropProgrammable { tab: tab_id, sql },
+                                    });
+                                }
+                                Err(e) => self.notify(e.to_string(), true),
+                            }
+                        }
                         ProgAction::Debug { oid, name } => {
                             let tab = DebugTab::new(conn, database.clone(), oid, name);
                             self.push_tab(TabKind::Debug(Box::new(tab)));

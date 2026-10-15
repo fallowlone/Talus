@@ -142,8 +142,10 @@ pub fn build(d: Dialect, q: &QuerySpec) -> DbResult<String> {
         (Engine::SqlServer, Some(n)) if q.order.is_empty() => format!("TOP ({n}) "),
         _ => String::new(),
     };
+    // Oracle does not accept AS before a table alias.
+    let as_kw = if d.0 == Engine::Oracle { " " } else { " AS " };
     let mut sql = format!(
-        "SELECT {}{top}{select}\nFROM {} AS {}",
+        "SELECT {}{top}{select}\nFROM {}{as_kw}{}",
         if q.distinct { "DISTINCT " } else { "" },
         d.qualified(&q.base.obj)?,
         d.quote_ident(&q.base.alias)?
@@ -152,7 +154,7 @@ pub fn build(d: Dialect, q: &QuerySpec) -> DbResult<String> {
         check(&j.left)?;
         check(&j.right)?;
         sql.push_str(&format!(
-            "\n{} JOIN {} AS {} ON {} = {}",
+            "\n{} JOIN {}{as_kw}{} ON {} = {}",
             if j.kind == JoinKind::Inner { "INNER" } else { "LEFT" },
             d.qualified(&j.table.obj)?,
             d.quote_ident(&j.table.alias)?,
@@ -197,6 +199,7 @@ pub fn build(d: Dialect, q: &QuerySpec) -> DbResult<String> {
             sql.push_str(&format!("\nOFFSET 0 ROWS FETCH NEXT {n} ROWS ONLY"))
         }
         (Engine::SqlServer, _) => {}
+        (Engine::Oracle, Some(n)) => sql.push_str(&format!("\nFETCH FIRST {n} ROWS ONLY")),
         (_, Some(n)) => sql.push_str(&format!("\nLIMIT {n}")),
         (_, None) => {}
     }

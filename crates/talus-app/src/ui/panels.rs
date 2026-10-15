@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use egui::RichText;
 use egui_extras::{Column, TableBuilder};
 use egui_phosphor::regular as icons;
-use talus_core::model::{ConnectionConfig, ObjectRef, TableStructure};
+use talus_core::model::{ConnectionConfig, Engine, ObjectRef, TableStructure};
 use talus_core::store::history::HistoryEntry;
 use uuid::Uuid;
 
@@ -214,9 +214,16 @@ pub fn info_pane(
             });
         }
         NavSel::Obj(conn, obj) => {
+            // Redis and MongoDB objects have no DDL (the engine refuses it) and their own names.
+            let sql = cfg.engine.is_sql();
+            let kind = match cfg.engine {
+                Engine::MongoDb => "Collection",
+                Engine::Redis => "Keys",
+                _ => obj.kind.label(),
+            };
             egui::Grid::new("info-obj").num_columns(2).show(ui, |ui| {
                 kv(ui, "Name", &obj.name);
-                kv(ui, "Type", obj.kind.label());
+                kv(ui, "Type", kind);
                 kv(ui, "Database", &obj.database);
                 if let Some(s) = &obj.schema {
                     kv(ui, "Schema", s);
@@ -227,6 +234,9 @@ pub fn info_pane(
                     kv(ui, "Primary key", if pk.is_empty() { "—" } else { &pk });
                 }
             });
+            if !sql {
+                return;
+            }
             ui.add_space(6.0);
             ui.label(RichText::new("DDL").strong());
             match ddl.get(&(*conn, obj.clone())) {

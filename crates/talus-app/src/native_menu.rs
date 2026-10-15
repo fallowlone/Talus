@@ -33,6 +33,7 @@ pub const TOOLS: &[Option<(&str, &str)>] = &[
     Some(("dict-html", "Data Dictionary (HTML)…")),
     Some(("dict-md", "Data Dictionary (Markdown)…")),
     Some(("jobs", "Automation (Jobs)…")),
+    Some(("workspace", "Shared Workspace…")),
     Some(("find", "Find in Database")),
     Some(("history", "History Log")),
 ];

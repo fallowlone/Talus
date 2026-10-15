@@ -3,7 +3,8 @@
 use egui::RichText;
 use talus_core::Secret;
 use talus_core::model::{
-    CLOUD_PRESETS, CloudPreset, ConnectionConfig, Engine, HttpProxyConfig, SshAuth, SshConfig, SslMode,
+    CLOUD_PRESETS, CloudPreset, ConnectionConfig, Engine, HttpProxyConfig, PhpTunnelConfig, SnowflakeAuth, SshAuth,
+    SshConfig, SslMode,
 };
 
 use crate::theme;
@@ -27,6 +28,8 @@ pub struct ConnDialog {
     ssh_port_text: String,
     use_http: bool,
     http: HttpProxyConfig,
+    use_php: bool,
+    php: PhpTunnelConfig,
     http_port_text: String,
     pub is_new: bool,
     pub test: TestState,
@@ -56,6 +59,8 @@ impl ConnDialog {
         let use_http = cfg.http_proxy.is_some();
         let http = cfg.http_proxy.clone().unwrap_or_default();
         let http_port_text = http.port.to_string();
+        let use_php = cfg.php_tunnel.is_some();
+        let php = cfg.php_tunnel.clone().unwrap_or_default();
         Self {
             cfg,
             password,
@@ -65,6 +70,8 @@ impl ConnDialog {
             ssh_port_text,
             use_http,
             http,
+            use_php,
+            php,
             http_port_text,
             is_new,
             test: TestState::Idle,
@@ -77,7 +84,10 @@ impl ConnDialog {
 
     fn collect(&mut self) -> Result<ConnInfo, String> {
         let mut cfg = self.cfg.clone();
-        cfg.ssh = if self.use_ssh && cfg.engine.capabilities().network {
+        // Snowflake connects directly over HTTPS (its tunnel UI is hidden); the dialog keeps the
+        // settings so switching back to another engine restores them.
+        let tunnels = cfg.engine.capabilities().network && cfg.engine != Engine::Snowflake;
+        cfg.ssh = if self.use_ssh && tunnels {
             let mut ssh = self.ssh.clone();
             ssh.port = self
                 .ssh_port_text
@@ -90,7 +100,7 @@ impl ConnDialog {
         } else {
             None
         };
-        cfg.http_proxy = if self.use_http && cfg.engine.capabilities().network {
+        cfg.http_proxy = if self.use_http && tunnels {
             let mut http = self.http.clone();
             http.port = self
                 .http_port_text
@@ -103,6 +113,8 @@ impl ConnDialog {
         } else {
             None
         };
+        cfg.php_tunnel = (self.use_php && tunnels)
+            .then(|| PhpTunnelConfig { url: self.php.url.trim().to_string(), save_secret: self.php.save_secret });
         if cfg.engine.capabilities().network {
             cfg.port =
                 self.port_text.trim().parse::<u16>().map_err(|_| "Port must be between 1 and 65535".to_string())?;
@@ -110,6 +122,15 @@ impl ConnDialog {
         cfg.group = Some(self.group_text.trim().to_string()).filter(|g| !g.is_empty());
         cfg.name = cfg.name.trim().to_string();
         cfg.host = cfg.host.trim().to_string();
+        if let Some(sc) = cfg.snowflake.as_mut() {
+            sc.warehouse = sc.warehouse.trim().to_string();
+            sc.role = sc.role.trim().to_string();
+            sc.schema = sc.schema.trim().to_string();
+            sc.endpoint = sc.endpoint.trim().to_string();
+            if let SnowflakeAuth::KeyPair { key_file } = &mut sc.auth {
+                *key_file = key_file.trim().to_string();
+            }
+        }
         if cfg.name.is_empty() {
             cfg.name = match cfg.engine {
                 Engine::Sqlite => std::path::Path::new(&cfg.database)
@@ -128,6 +149,7 @@ impl ConnDialog {
         egui::CollapsingHeader::new("SSH Tunnel").id_salt("conn-ssh").default_open(self.use_ssh).show(ui, |ui| {
             if ui.checkbox(&mut self.use_ssh, "Use SSH tunnel").changed() && self.use_ssh {
                 self.use_http = false;
+                self.use_php = false;
             }
             ui.add_enabled_ui(self.use_ssh, |ui| {
                 egui::Grid::new("conn-ssh-grid").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(
@@ -199,6 +221,7 @@ impl ConnDialog {
         egui::CollapsingHeader::new("HTTP Tunnel").id_salt("conn-http").default_open(self.use_http).show(ui, |ui| {
             if ui.checkbox(&mut self.use_http, "Use HTTP tunnel").changed() && self.use_http {
                 self.use_ssh = false;
+                self.use_php = false;
             }
             ui.add_enabled_ui(self.use_http, |ui| {
                 egui::Grid::new("conn-http-grid").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(
@@ -231,6 +254,47 @@ impl ConnDialog {
                     },
                 );
                 ui.label(RichText::new("Host and port above are resolved by the proxy (HTTP CONNECT).").small());
+            });
+        });
+    }
+
+    /// PHP tunnel: a script on a web host that can reach the database (shared hosting, no SSH).
+    fn php_ui(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("PHP Tunnel").id_salt("conn-php").default_open(self.use_php).show(ui, |ui| {
+            if ui.checkbox(&mut self.use_php, "Use PHP tunnel script").changed() && self.use_php {
+                self.use_ssh = false;
+                self.use_http = false;
+            }
+            ui.add_enabled_ui(self.use_php, |ui| {
+                egui::Grid::new("conn-php-grid").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(
+                    ui,
+                    |ui| {
+                        let l = ui.label("Script Address");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.php.url)
+                                .hint_text("https://example.com/talus-tunnel.php")
+                                .desired_width(300.0),
+                        )
+                        .labelled_by(l.id);
+                        ui.end_row();
+                        let l = ui.label("Tunnel Key");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.tunnel_secret).password(true).desired_width(200.0),
+                            )
+                            .labelled_by(l.id);
+                            ui.checkbox(&mut self.php.save_secret, "Save in Keychain");
+                        });
+                        ui.end_row();
+                    },
+                );
+                ui.label(
+                    RichText::new(
+                        "Host and port above are resolved by the web host and must be on the script's allow list. \
+                         The database password does not pass through the script.",
+                    )
+                    .small(),
+                );
             });
         });
     }
@@ -312,50 +376,143 @@ impl ConnDialog {
                     .labelled_by(l.id);
                     ui.end_row();
                     if self.cfg.engine.capabilities().network {
-                        let l = ui.label("Host");
-                        let hint = self.preset.map_or("localhost", |p| p.host_hint);
+                        let snowflake = self.cfg.engine == Engine::Snowflake;
+                        let l = ui.label(if snowflake { "Account" } else { "Host" });
+                        let hint =
+                            if snowflake { "e.g. xy12345.eu-west-1" } else { self.preset.map_or("localhost", |p| {
+                                p.host_hint
+                            }) };
                         ui.add(egui::TextEdit::singleline(&mut self.cfg.host).hint_text(hint).desired_width(300.0))
                             .labelled_by(l.id);
                         ui.end_row();
-                        let l = ui.label("Port");
-                        ui.add(egui::TextEdit::singleline(&mut self.port_text).desired_width(80.0)).labelled_by(l.id);
-                        ui.end_row();
+                        if !snowflake {
+                            let l = ui.label("Port");
+                            ui.add(egui::TextEdit::singleline(&mut self.port_text).desired_width(80.0))
+                                .labelled_by(l.id);
+                            ui.end_row();
+                        }
                         let l = ui.label("User Name");
                         ui.add(egui::TextEdit::singleline(&mut self.cfg.user).desired_width(300.0)).labelled_by(l.id);
                         ui.end_row();
-                        let l = ui.label("Password");
-                        ui.horizontal(|ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0))
+                        if snowflake {
+                            let key_file = match &self.cfg.snowflake_config().auth {
+                                SnowflakeAuth::KeyPair { key_file } => key_file.clone(),
+                                _ => String::new(),
+                            };
+                            let mut method = match self.cfg.snowflake_config().auth {
+                                SnowflakeAuth::Password => 0,
+                                SnowflakeAuth::KeyPair { .. } => 1,
+                                SnowflakeAuth::OAuth => 2,
+                            };
+                            ui.label("Authentication");
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut method, 0, "Password");
+                                ui.radio_value(&mut method, 1, "Key pair");
+                                ui.radio_value(&mut method, 2, "OAuth token");
+                            });
+                            ui.end_row();
+                            self.cfg.snowflake.get_or_insert_default().auth = match method {
+                                1 => SnowflakeAuth::KeyPair { key_file },
+                                2 => SnowflakeAuth::OAuth,
+                                _ => SnowflakeAuth::Password,
+                            };
+                        }
+                        let sf_auth = snowflake.then(|| self.cfg.snowflake_config().auth);
+                        if matches!(sf_auth, Some(SnowflakeAuth::KeyPair { .. })) {
+                            let l = ui.label("Private Key File");
+                            if let SnowflakeAuth::KeyPair { key_file } =
+                                &mut self.cfg.snowflake.get_or_insert_default().auth
+                            {
+                                ui.add(
+                                    egui::TextEdit::singleline(key_file)
+                                        .hint_text("/path/to/rsa_key.p8 (unencrypted PEM)")
+                                        .desired_width(300.0),
+                                )
                                 .labelled_by(l.id);
-                            ui.checkbox(&mut self.cfg.save_password, "Save in Keychain");
-                        });
-                        ui.end_row();
+                            }
+                            ui.end_row();
+                        } else {
+                            let l = ui.label(if matches!(sf_auth, Some(SnowflakeAuth::OAuth)) {
+                                "OAuth Token"
+                            } else {
+                                "Password"
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0),
+                                )
+                                .labelled_by(l.id);
+                                ui.checkbox(&mut self.cfg.save_password, "Save in Keychain");
+                            });
+                            ui.end_row();
+                        }
                         let label = match self.cfg.engine {
                             Engine::Redis => "Database Index",
                             Engine::MongoDb => "Auth Database",
+                            Engine::Oracle => "Service Name",
                             _ => "Initial Database",
                         };
                         let l = ui.label(label);
-                        let hint = self.cfg.engine.default_database().unwrap_or("(none)");
+                        let hint = match self.cfg.engine {
+                            Engine::Oracle => "e.g. FREEPDB1 or ORCLPDB1",
+                            Engine::Snowflake => "e.g. ANALYTICS",
+                            e => e.default_database().unwrap_or("(none)"),
+                        };
                         ui.add(egui::TextEdit::singleline(&mut self.cfg.database).hint_text(hint).desired_width(300.0))
                             .labelled_by(l.id);
                         ui.end_row();
-                        ui.label("SSL");
-                        ui.horizontal(|ui| {
-                            for m in SslMode::ALL {
-                                ui.radio_value(&mut self.cfg.ssl_mode, m, m.label());
+                        if snowflake {
+                            // Warehouse/role/schema fall back to the user's server-side defaults when empty.
+                            for (label, hint) in [
+                                ("Warehouse", "e.g. COMPUTE_WH — every query bills on it"),
+                                ("Role", "e.g. SYSADMIN"),
+                                ("Schema", "PUBLIC"),
+                                ("Custom Endpoint", "PrivateLink URL (empty = default)"),
+                            ] {
+                                let l = ui.label(label);
+                                let field = match label {
+                                    "Warehouse" => &mut self.cfg.snowflake.get_or_insert_default().warehouse,
+                                    "Role" => &mut self.cfg.snowflake.get_or_insert_default().role,
+                                    "Schema" => &mut self.cfg.snowflake.get_or_insert_default().schema,
+                                    _ => &mut self.cfg.snowflake.get_or_insert_default().endpoint,
+                                };
+                                ui.add(egui::TextEdit::singleline(field).hint_text(hint).desired_width(300.0))
+                                    .labelled_by(l.id);
+                                ui.end_row();
                             }
-                        });
-                        ui.end_row();
-                        if self.cfg.ssl_mode == SslMode::VerifyFull {
-                            let l = ui.label("CA Certificate");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.cfg.ssl_ca_file)
-                                    .hint_text("PEM file (empty = system roots)")
-                                    .desired_width(300.0),
-                            )
-                            .labelled_by(l.id);
+                            ui.label("TLS");
+                            ui.label(
+                                RichText::new("Always on: Snowflake speaks verified HTTPS.").color(p.text_dim).small(),
+                            );
                             ui.end_row();
+                        } else {
+                            ui.label("SSL");
+                            ui.horizontal(|ui| {
+                                for m in SslMode::ALL {
+                                    ui.radio_value(&mut self.cfg.ssl_mode, m, m.label());
+                                }
+                            });
+                            ui.end_row();
+                            if self.cfg.engine == Engine::Oracle && self.cfg.ssl_mode != SslMode::Disable {
+                                // `prefer` cannot be negotiated on Oracle's listener: only require / verify-full use TCPS.
+                                let l = ui.label("Wallet Directory");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.cfg.ssl_ca_file)
+                                        .hint_text("folder with ewallet.pem (empty = system roots); TCPS needs require / verify-full")
+                                        .desired_width(300.0),
+                                )
+                                .labelled_by(l.id);
+                                ui.end_row();
+                            } else if self.cfg.ssl_mode == SslMode::VerifyFull {
+                                let l = ui.label("CA Certificate");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.cfg.ssl_ca_file)
+                                        .hint_text("PEM file (empty = system roots)")
+                                        .desired_width(300.0),
+                                )
+                                .labelled_by(l.id);
+                                ui.end_row();
+                            }
                         }
                     } else {
                         let l = ui.label("Database File");
@@ -413,9 +570,10 @@ impl ConnDialog {
                     .labelled_by(l.id);
                     ui.end_row();
                 });
-                if self.cfg.engine.capabilities().network {
+                if self.cfg.engine.capabilities().network && self.cfg.engine != Engine::Snowflake {
                     self.ssh_ui(ui);
                     self.http_ui(ui);
+                    self.php_ui(ui);
                 }
                 egui::CollapsingHeader::new("Advanced").id_salt("conn-adv").show(ui, |ui| {
                     egui::Grid::new("conn-adv-grid").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(

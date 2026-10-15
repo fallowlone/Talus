@@ -81,6 +81,24 @@ pub async fn list_users(s: &mut Session) -> DbResult<Vec<UserInfo>> {
                 })
                 .collect())
         }
+        Engine::Oracle => {
+            // dba_users shows the account status; without SELECT_CATALOG_ROLE only the names are visible.
+            let full = "SELECT username, account_status FROM dba_users WHERE oracle_maintained = 'N' ORDER BY username";
+            let names = "SELECT username, 'OPEN' FROM all_users WHERE oracle_maintained = 'N' ORDER BY username";
+            let found = match rows(s, full).await {
+                Ok(r) => r,
+                Err(_) => rows(s, names).await?,
+            };
+            Ok(found
+                .iter()
+                .map(|r| {
+                    let status = cell(r, 1);
+                    let attrs =
+                        if status == "OPEN" { Vec::new() } else { vec![status.to_lowercase().replace('_', " ")] };
+                    UserInfo { name: cell(r, 0), host: None, attrs }
+                })
+                .collect())
+        }
         Engine::MySql => {
             let sql = "SELECT User, Host, account_locked, password_expired FROM mysql.user ORDER BY User, Host";
             Ok(rows(s, sql)
@@ -98,6 +116,35 @@ pub async fn list_users(s: &mut Session) -> DbResult<Vec<UserInfo>> {
                 })
                 .collect())
         }
+        Engine::Snowflake => {
+            let out = s.run_script("SHOW USERS", &ScriptOptions::default()).await;
+            if let Some(e) = out.errors.first() {
+                return Err(DbError::Invalid(e.error.to_string()));
+            }
+            let rows = match out.results.into_iter().next().map(|r| r.outcome) {
+                Some(Outcome::Rows(q)) => {
+                    let idx = |n: &str| q.columns.iter().position(|c| c.name.eq_ignore_ascii_case(n));
+                    let Some(name) = idx("name") else { return Ok(Vec::new()) };
+                    let (lock, must) = (idx("snowflake_lock"), idx("must_change_password"));
+                    q.rows
+                        .iter()
+                        .map(|r| {
+                            let on = |i: Option<usize>| i.is_some_and(|i| cell(r, i).eq_ignore_ascii_case("true"));
+                            let mut attrs = Vec::new();
+                            if on(lock) {
+                                attrs.push("locked".to_string());
+                            }
+                            if on(must) {
+                                attrs.push("must change password".to_string());
+                            }
+                            UserInfo { name: cell(r, name), host: None, attrs }
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            Ok(rows)
+        }
     }
 }
 
@@ -110,6 +157,28 @@ pub async fn grants(s: &mut Session, u: &UserInfo) -> DbResult<Vec<String>> {
             let host = u.host.as_deref().unwrap_or("%");
             let sql = format!("SHOW GRANTS FOR {}@{}", d.string_literal(&u.name), d.string_literal(host));
             Ok(rows(s, &sql).await?.iter().map(|r| cell(r, 0)).collect())
+        }
+        Engine::Snowflake => {
+            let sql = format!("SHOW GRANTS TO USER {}", d.quote_ident(&u.name)?);
+            let out = s.run_script(&sql, &ScriptOptions::default()).await;
+            if let Some(e) = out.errors.first() {
+                return Err(DbError::Invalid(e.error.to_string()));
+            }
+            match out.results.into_iter().next().map(|r| r.outcome) {
+                Some(Outcome::Rows(q)) => {
+                    let idx = |n: &str| q.columns.iter().position(|c| c.name.eq_ignore_ascii_case(n));
+                    let (privilege, on, name, to, grantee) =
+                        (idx("privilege"), idx("granted_on"), idx("name"), idx("granted_to"), idx("grantee_name"));
+                    Ok(q.rows
+                        .iter()
+                        .map(|r| {
+                            let at = |i: Option<usize>| i.map(|i| cell(r, i)).unwrap_or_default();
+                            format!("GRANT {} ON {} {} TO {} {}", at(privilege), at(on), at(name), at(to), at(grantee))
+                        })
+                        .collect())
+                }
+                _ => Ok(Vec::new()),
+            }
         }
         Engine::SqlServer => {
             let n = d.string_literal(&u.name);
@@ -132,6 +201,25 @@ pub async fn grants(s: &mut Session, u: &UserInfo) -> DbResult<Vec<String>> {
                        + ' TO ' + QUOTENAME(u.name) \
                      FROM sys.database_permissions dp JOIN sys.database_principals u ON u.principal_id = dp.grantee_principal_id \
                      WHERE u.sid = SUSER_SID({n}) ORDER BY 1"
+                ),
+            ] {
+                out.extend(rows(s, &sql).await?.iter().map(|r| cell(r, 0)));
+            }
+            Ok(out)
+        }
+        Engine::Oracle => {
+            let n = d.string_literal(&u.name);
+            let mut out = Vec::new();
+            for sql in [
+                format!(
+                    "SELECT 'GRANT ' || granted_role || ' TO ' || grantee FROM dba_role_privs WHERE grantee = {n} ORDER BY granted_role"
+                ),
+                format!(
+                    "SELECT 'GRANT ' || privilege || ' TO ' || grantee FROM dba_sys_privs WHERE grantee = {n} ORDER BY privilege"
+                ),
+                format!(
+                    "SELECT 'GRANT ' || LISTAGG(privilege, ', ') WITHIN GROUP (ORDER BY privilege) || ' ON ' || owner || '.' || table_name \
+                     || ' TO ' || grantee FROM dba_tab_privs WHERE grantee = {n} GROUP BY owner, table_name, grantee ORDER BY owner, table_name"
                 ),
             ] {
                 out.extend(rows(s, &sql).await?.iter().map(|r| cell(r, 0)));
@@ -165,18 +253,29 @@ pub fn create_user_sql(engine: Engine, name: &str, host: &str, password: &str) -
         return Err(DbError::Invalid("a password is required".into()));
     }
     let d = Dialect(engine);
+    // Oracle takes the password as a (case-sensitive) double-quoted identifier, not a string literal.
+    let (real_pw, masked_pw) = if engine == Engine::Oracle {
+        if password.contains(['"', '\0']) {
+            return Err(DbError::Invalid("an Oracle password cannot contain double quotes".into()));
+        }
+        (format!("\"{password}\""), "\"••••••••\"".to_string())
+    } else {
+        (d.string_literal(password), "'••••••••'".to_string())
+    };
     let build = |pw: &str| -> DbResult<String> {
         Ok(match engine {
             Engine::Sqlite | Engine::Redis | Engine::MongoDb => return Err(unsupported()),
             Engine::Postgres => format!("CREATE ROLE {} LOGIN PASSWORD {pw}", d.quote_ident(name)?),
             Engine::SqlServer => format!("CREATE LOGIN {} WITH PASSWORD = {pw}", d.quote_ident(name)?),
+            Engine::Oracle => format!("CREATE USER {} IDENTIFIED BY {pw}", d.quote_ident(name)?),
+            Engine::Snowflake => format!("CREATE USER {} PASSWORD {pw}", d.quote_ident(name)?),
             Engine::MySql => {
                 let host = Some(host.trim()).filter(|h| !h.is_empty()).unwrap_or("%");
                 format!("CREATE USER {}@{} IDENTIFIED BY {pw}", d.string_literal(name), d.string_literal(host))
             }
         })
     };
-    Ok((build(&d.string_literal(password))?, build("'••••••••'")?))
+    Ok((build(&real_pw)?, build(&masked_pw)?))
 }
 
 /// What a privilege applies to.
@@ -235,6 +334,20 @@ pub fn privileges(engine: Engine, target: &GrantTarget) -> &'static [&'static st
             "EXECUTE",
             "CONTROL",
         ],
+        (Engine::Oracle, GrantTarget::Table(_)) => {
+            &["SELECT", "INSERT", "UPDATE", "DELETE", "ALTER", "INDEX", "REFERENCES"]
+        }
+        // System privileges: Oracle has neither schema- nor database-level grants of object rights.
+        (Engine::Oracle, _) => &[
+            "CREATE SESSION",
+            "CREATE TABLE",
+            "CREATE VIEW",
+            "CREATE SEQUENCE",
+            "CREATE PROCEDURE",
+            "CREATE TRIGGER",
+            "CREATE TYPE",
+            "UNLIMITED TABLESPACE",
+        ],
         _ => &[],
     }
 }
@@ -249,7 +362,15 @@ pub fn grant_sql(
 ) -> DbResult<String> {
     let allowed = privileges(engine, target);
     if allowed.is_empty() {
-        return Err(unsupported());
+        // Snowflake has users but grants privileges to roles, which the editor does not model.
+        return Err(if engine == Engine::Snowflake {
+            DbError::Invalid(
+                "Snowflake grants privileges to roles, not users; use CREATE ROLE and GRANT … TO ROLE in a query"
+                    .into(),
+            )
+        } else {
+            unsupported()
+        });
     }
     if privs.is_empty() {
         return Err(DbError::Invalid("choose at least one privilege".into()));
@@ -267,11 +388,12 @@ pub fn grant_sql(
         (Engine::SqlServer, GrantTarget::Table(o)) => d.qualified(o)?,
         (Engine::SqlServer, GrantTarget::Schema(s)) => format!("SCHEMA::{}", d.quote_ident(s)?),
         (Engine::SqlServer, GrantTarget::Database(_)) => String::new(),
+        (Engine::Oracle, GrantTarget::Table(o)) => d.qualified(o)?,
+        (Engine::Oracle, _) => String::new(),
         _ => return Err(unsupported()),
     };
     let who = match engine {
-        Engine::Postgres => d.quote_ident(&user.name)?,
-        Engine::SqlServer => d.quote_ident(&user.name)?,
+        Engine::Postgres | Engine::SqlServer | Engine::Oracle => d.quote_ident(&user.name)?,
         _ => format!("{}@{}", d.string_literal(&user.name), d.string_literal(user.host.as_deref().unwrap_or("%"))),
     };
     let list = privs.join(", ");
@@ -285,6 +407,9 @@ pub fn drop_user_sql(engine: Engine, u: &UserInfo) -> DbResult<String> {
         Engine::Sqlite | Engine::Redis | Engine::MongoDb => Err(unsupported()),
         Engine::Postgres => Ok(format!("DROP ROLE {}", d.quote_ident(&u.name)?)),
         Engine::SqlServer => Ok(format!("DROP LOGIN {}", d.quote_ident(&u.name)?)),
+        // No CASCADE: an account that still owns objects must be emptied on purpose.
+        Engine::Oracle => Ok(format!("DROP USER {}", d.quote_ident(&u.name)?)),
+        Engine::Snowflake => Ok(format!("DROP USER {}", d.quote_ident(&u.name)?)),
         Engine::MySql => Ok(format!(
             "DROP USER {}@{}",
             d.string_literal(&u.name),

@@ -99,13 +99,14 @@ impl App {
     }
 
     fn tools_items(&mut self, ui: &mut egui::Ui) {
-        let items: [(&str, &str, Option<Action>); 11] = [
+        let items: [(&str, &str, Option<Action>); 12] = [
             (icons::ARROWS_LEFT_RIGHT, "Structure Synchronization…", Some(Action::OpenSync)),
             (icons::TREE_STRUCTURE, "Data Modeling", Some(Action::OpenModel)),
             (icons::BLUEPRINT, "Query Builder", Some(Action::OpenBuilder)),
             (icons::USERS, "Users and Privileges", None),
             (icons::FUNCTION, "Routines and Triggers", Some(Action::OpenRoutines)),
             (icons::CLOCK_COUNTDOWN, "Automation (Jobs)…", Some(Action::OpenJobs)),
+            (icons::USERS_THREE, "Shared Workspace…", Some(Action::OpenWorkspace)),
             (icons::DOWNLOAD_SIMPLE, "Dump Structure and Data…", Some(Action::DumpSql { include_data: true })),
             (icons::FILE_ARROW_DOWN, "Dump Structure Only…", Some(Action::DumpSql { include_data: false })),
             (icons::PLAY, "Execute SQL File…", Some(Action::RunSqlFile)),

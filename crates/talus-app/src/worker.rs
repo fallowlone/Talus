@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
-use talus_core::debugger::{DebugEvent, PgDebugger};
+use talus_core::debugger::{DebugEvent, Debugger};
 use talus_core::engine::{CancelHandle, ScriptOptions, ScriptOutcome, Session};
 use talus_core::export::ExportFormat;
 use talus_core::model::{ApplyReport, ChangeSet, ConnectionConfig, ObjectRef, PageQuery, QueryResult, TableStructure};
@@ -404,10 +404,11 @@ async fn run_job(
         let v = s.server_version().await;
         let _ = s.close().await;
         drop(tunnel);
-        let via = match (&conn.cfg.ssh, &conn.cfg.http_proxy) {
-            (Some(_), _) => " (via SSH)",
-            (None, Some(_)) => " (via HTTP tunnel)",
-            (None, None) => "",
+        let via = match (&conn.cfg.ssh, &conn.cfg.http_proxy, &conn.cfg.php_tunnel) {
+            (Some(_), _, _) => " (via SSH)",
+            (None, Some(_), _) => " (via HTTP tunnel)",
+            (None, None, Some(_)) => " (via PHP tunnel)",
+            (None, None, None) => "",
         };
         return v.map(|v| Response::Tested(format!("{v}{via}")));
     }
@@ -493,7 +494,7 @@ async fn shared_tunnel(shared: &Shared, conn: &ConnInfo) -> Result<Option<Arc<Tu
     Ok(Some(t))
 }
 
-type DebugSlot = (Arc<tokio::sync::Mutex<Option<PgDebugger>>>, Option<CancelHandle>);
+type DebugSlot = (Arc<tokio::sync::Mutex<Option<Debugger>>>, Option<CancelHandle>);
 
 async fn debug_op(
     shared: &Shared,
@@ -524,7 +525,7 @@ async fn debug_op(
                 None => conn.cfg.clone(),
             };
             let (dbg, event) =
-                PgDebugger::start(&cfg, conn.password.as_ref(), database, &target, &args, &breakpoints).await?;
+                Debugger::start(&cfg, conn.password.as_ref(), database, &target, &args, &breakpoints).await?;
             if let Ok(mut map) = shared.debuggers.lock()
                 && let Some(entry) = map.get_mut(&tab)
             {
@@ -563,7 +564,14 @@ async fn debug_op(
 
 /// Connection settings rewritten to go through a local tunnel port.
 fn tunneled(cfg: &ConnectionConfig, local_port: u16) -> ConnectionConfig {
-    ConnectionConfig { host: "127.0.0.1".into(), port: local_port, ssh: None, http_proxy: None, ..cfg.clone() }
+    ConnectionConfig {
+        host: "127.0.0.1".into(),
+        port: local_port,
+        ssh: None,
+        http_proxy: None,
+        php_tunnel: None,
+        ..cfg.clone()
+    }
 }
 
 /// Opens a throw-away session (own tunnel if needed) for the target side of a data sync.

@@ -55,7 +55,12 @@ fn kind_of(engine: Engine, data_type: &str) -> Kind {
     ]
     .iter()
     .any(|k| base.contains(k))
-        || (engine == Engine::SqlServer && matches!(base, "text" | "ntext"));
+        || (engine == Engine::SqlServer && matches!(base, "text" | "ntext"))
+        || (engine == Engine::Oracle
+            && matches!(
+                base,
+                "clob" | "nclob" | "long" | "long raw" | "raw" | "bfile" | "xmltype" | "rowid" | "urowid"
+            ));
     if count_only {
         return Kind::CountOnly;
     }
@@ -70,8 +75,16 @@ fn text_cast(engine: Engine, expr: &str) -> String {
     match engine {
         Engine::Postgres => format!("CAST({expr} AS text)"),
         Engine::SqlServer => format!("CAST({expr} AS nvarchar(4000))"),
+        Engine::Oracle => format!("CAST({expr} AS VARCHAR2(4000))"),
+        // VARIANT / OBJECT / ARRAY have no MIN / MAX ordering; their text does.
+        Engine::Snowflake => format!("CAST({expr} AS VARCHAR)"),
         _ => expr.to_string(),
     }
+}
+
+/// A number as text without Oracle's dropped leading zero (`.5`).
+fn number_text(engine: Engine, expr: &str) -> String {
+    if engine == Engine::Oracle { format!("TO_CHAR({expr}, 'TM9')") } else { text_cast(engine, expr) }
 }
 
 /// `(statistics query, top-values query)` for one column.
@@ -80,9 +93,9 @@ fn queries(d: Dialect, table: &str, col: &str, kind: Kind, top: usize) -> (Strin
         Kind::CountOnly => format!("SELECT COUNT(*), COUNT({col}), NULL, NULL, NULL, NULL FROM {table}"),
         Kind::Numeric => format!(
             "SELECT COUNT(*), COUNT({col}), COUNT(DISTINCT {col}), {}, {}, {} FROM {table}",
-            text_cast(d.0, &format!("MIN({col})")),
-            text_cast(d.0, &format!("MAX({col})")),
-            text_cast(d.0, &format!("AVG({col})")),
+            number_text(d.0, &format!("MIN({col})")),
+            number_text(d.0, &format!("MAX({col})")),
+            number_text(d.0, &format!("AVG({col})")),
         ),
         Kind::Text => format!(
             "SELECT COUNT(*), COUNT({col}), COUNT(DISTINCT {col}), MIN({0}), MAX({0}), NULL FROM {table}",
@@ -94,6 +107,9 @@ fn queries(d: Dialect, table: &str, col: &str, kind: Kind, top: usize) -> (Strin
         Engine::SqlServer => {
             format!("SELECT TOP ({top}) {shown}, COUNT(*) AS n FROM {table} GROUP BY {col} ORDER BY COUNT(*) DESC")
         }
+        Engine::Oracle => format!(
+            "SELECT {shown}, COUNT(*) AS n FROM {table} GROUP BY {col} ORDER BY n DESC FETCH FIRST {top} ROWS ONLY"
+        ),
         _ => format!("SELECT {shown}, COUNT(*) AS n FROM {table} GROUP BY {col} ORDER BY n DESC LIMIT {top}"),
     };
     (stats, top_sql)
